@@ -6,8 +6,13 @@ DEFAULT_FILE = "test/index.html"
 
 class URL:
     def __init__(self, url):
-        if url.startswith("data:"):
-
+        if url.startswith("view-source:"):
+            self.scheme = "view-source"
+            self.inner_url = URL(url[len("view-source:"):])  # parse the inner URL recursively
+            self.host = None
+            self.port = None
+            self.path = None
+        elif url.startswith("data:"):
             self.scheme = "data"
             url = url[len("data:") :]
             self.mimetype, self.data = url.split(",", 1)
@@ -49,6 +54,8 @@ class URL:
                         self.port = 80
 
     def request(self):
+        if self.scheme == "view-source":
+            return self.inner_url.request()  # fetch normally, just return raw body
         if self.scheme == "data":
             if self.mimetype == "text/html" or self.mimetype == "text/plain":
                 return self.data
@@ -131,8 +138,10 @@ def show(body):
 
 def load(url):
     body = url.request()
-    show(body)
-
+    if url.scheme == "view-source":
+        print(body)  # print raw HTML source as-is
+    else:
+        show(body)   # strip tags and print text
 
 if __name__ == "__main__":
     import sys
