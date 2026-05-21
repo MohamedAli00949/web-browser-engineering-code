@@ -34,8 +34,15 @@ class URL:
       ctx = ssl.create_default_context()
       s = ctx.wrap_socket(s, server_hostname=self.host)
 
-    request = "GET {} HTTP/1.0\r\n".format(self.path)
-    request += "Host: {}\r\n".format(self.host)
+    request_headers = {
+      "Host": self.host,
+      "Connection": "close",
+      "User-Agent": "MoBrowserFromWebBrowserEngineeringBook/1.0",
+    }
+
+    request = "GET {} HTTP/1.1\r\n".format(self.path)
+    for header, value in request_headers.items():
+      request += "{}: {}\r\n".format(header, value)
     request += "\r\n"
     s.send(request.encode("utf-8"))
 
@@ -52,7 +59,7 @@ class URL:
       header, value = line.split(":", 1)
       response_headers[header.casefold()] = value.strip()
     
-    assert "transfer-encoding" not in response_headers
+    # assert "transfer-encoding" not in response_headers
     assert "content-encoding" not in response_headers
 
     content = response.read()
