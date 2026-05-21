@@ -1,0 +1,26 @@
+<!-- test_entities.html -->
+<html>
+
+<body>
+
+  <!-- 1. basic entities -->
+  <p>&lt;div&gt;</p>
+
+  <!-- 2. entities in a math expression -->
+  <p>1 &lt; 2 &gt; 0</p>
+
+  <!-- 3. escaped tag shown as text -->
+  <p>&lt;b&gt;bold&lt;/b&gt;</p>
+
+  <!-- 4. real tags should still be stripped -->
+  <p>hello</p>
+
+  <!-- 5. unknown entity printed raw -->
+  <p>&unknown;</p>
+
+  <!-- 6. entity inside a real tag (entity only in text node) -->
+  <p>&lt;img&gt;</p>
+
+</body>
+
+</html>
