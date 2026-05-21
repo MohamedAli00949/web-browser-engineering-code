@@ -12,3 +12,5 @@ These materials include:
 
 ## Result Tracking
 For tracking how to rich to you goal for creating your own simple browser.
+
+You can start track the results at the results directory.
