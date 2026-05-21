@@ -6,37 +6,50 @@ DEFAULT_FILE = "test/index.html"
 
 class URL:
   def __init__(self, url):
-    self.scheme, url = url.split("://", 1)
-    # assert self.scheme in ("http", "file", "data", "view-source")
-    assert self.scheme in ["http", "https", "file"]
+    if url.startswith("data:"): 
 
-    if self.scheme == "file":
-      # On Windows, file:///D:/path → url = /D:/path
-      # Strip the leading slash before a drive letter (e.g. /D:/)
-      if os.name == "nt" and url.startswith("/") and len(url) > 2 and url[2] == ":":
-          url = url[1:]  # remove the leading slash
-      self.path = url
+      self.scheme = "data"
+      url = url[len("data:"):]
+      self.mimetype, self.data = url.split(",", 1)
       self.host = None
       self.port = None
-    else:
-      if "/" not in url:
-        url = url + "/"
-      
-      self.host, url = url.split("/", 1)
-      self.path = "/" + url
+      self.path = None
+    else: 
+      self.scheme, url = url.split("://", 1)
+      # assert self.scheme in ("http", "file", "data", "view-source")
+      assert self.scheme in ["http", "https", "file"]
 
-      if ":" in self.host:
-        self.host, self.port = self.host.split(":", 1)
-        self.port = int(self.port)
+      if self.scheme == "file":
+        # On Windows, file:///D:/path → url = /D:/path
+        # Strip the leading slash before a drive letter (e.g. /D:/)
+        if os.name == "nt" and url.startswith("/") and len(url) > 2 and url[2] == ":":
+            url = url[1:]  # remove the leading slash
+        self.path = url
+        self.host = None
+        self.port = None
       else:
-        if self.scheme == "https":
-          self.port = 443
+        if "/" not in url:
+          url = url + "/"
+        
+        self.host, url = url.split("/", 1)
+        self.path = "/" + url
+
+        if ":" in self.host:
+          self.host, self.port = self.host.split(":", 1)
+          self.port = int(self.port)
         else:
-          self.port = 80
+          if self.scheme == "https":
+            self.port = 443
+          else:
+            self.port = 80
   
   def request(self):
-
-    if self.scheme == "file":
+    if self.scheme == "data":
+      if self.mimetype == "text/html" or self.mimetype == "text/plain":
+        return self.data
+      else:
+        return f"<p>Unsupported data type: {self.mimetype}</p>"
+    elif self.scheme == "file":
       with open(self.path, "r") as f:
         return f.read()
     else:
@@ -65,8 +78,8 @@ class URL:
 
       response = s.makefile("r", encoding="utf8", newline="\r\n")
 
-      statusline = response.readline()
-      version, status, explanation = statusline.split(" ", 2)
+      statusLine = response.readline()
+      version, status, explanation = statusLine.split(" ", 2)
 
       response_headers = {}
       while True:
