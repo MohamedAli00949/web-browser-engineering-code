@@ -2,6 +2,7 @@ import socket
 import ssl
 import os
 import gzip
+import time
 
 DEFAULT_FILE = "test/index.html"
 
@@ -26,8 +27,43 @@ def read_chunked(response):
 
     return body
 
+def cache_key(scheme, host, path):
+    """Unique string key for this URL."""
+    return f"{scheme}://{host}{path}"
+
+def parse_cache_control(response_headers):
+        """
+        Returns (cacheable, max_age).
+        cacheable = False if no-store or any unrecognized directive is present.
+        max_age   = seconds to cache, or None if not specified.
+        """
+        if "cache-control" not in response_headers:
+            return True, None  # no header → assume cacheable, no expiry
+
+        directives = [d.strip() for d in response_headers["cache-control"].split(",")]
+        max_age = None
+        cacheable = True
+
+        for directive in directives:
+            if directive == "no-store":
+                return False, None  # must not cache
+            elif directive.startswith("max-age="):
+                try:
+                    max_age = int(directive.split("=", 1)[1])
+                except ValueError:
+                    cacheable = False
+            elif directive == "no-cache":
+                # no-cache means "revalidate", treat as not cacheable for simplicity
+                cacheable = False
+            # any other directive → don't cache
+            elif directive not in ("public", "private", "must-revalidate"):
+                cacheable = False
+
+        return cacheable, max_age
+
 class URL:
     socket_cache = {}
+    response_cache = {}
 
     def __init__(self, url):
         if url.startswith("view-source:"):
@@ -92,9 +128,19 @@ class URL:
             with open(self.path, "r", encoding="utf8") as f:
                 return f.read()
         else:
-            cache_key = (self.host, self.port)
+            # ── cache lookup ───────────────────────────────────────────────
+            key = cache_key(self.scheme, self.host, self.path)
+            if key in URL.response_cache:
+                entry = URL.response_cache[key]
+                if entry["expires"] is None or time.time() < entry["expires"]:
+                    return entry["content"]
+                else:
+                    del URL.response_cache[key]
+            # ──────────────────────────────────────────────────────────────
 
-            s = URL.socket_cache.get(cache_key)
+            socket_key = (self.host, self.port)
+
+            s = URL.socket_cache.get(socket_key)
 
             if s is None:
                 s = socket.socket(
@@ -148,7 +194,7 @@ class URL:
 
                 redirect_url = response_headers["location"]
                 s.close()
-                URL.socket_cache.pop(cache_key, None)
+                URL.socket_cache.pop(socket_key, None)
 
                 if redirect_url.startswith("/"):
                     redirect_url = f"{self.scheme}://{self.host}{redirect_url}"
@@ -174,7 +220,13 @@ class URL:
             if response_headers.get("connection", "").lower() == "close":
                 s.close()
             else:
-                URL.socket_cache[cache_key] = s
+                URL.socket_cache[socket_key] = s
+
+            if status == "200":
+                cacheable, max_age = parse_cache_control(response_headers)
+                if cacheable:
+                    expires = (time.time() + max_age) if max_age is not None else None
+                    URL.response_cache[key] = {"content": content, "expires": expires}
 
             return content
 
