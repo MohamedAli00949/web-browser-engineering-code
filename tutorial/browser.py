@@ -78,7 +78,9 @@ class URL:
                 else:
                     self.port = 443 if self.scheme == "https" else 80
 
-    def request(self):
+    def request(self, redirects=0):
+        MAX_REDIRECTS = 10
+
         if self.scheme == "view-source":
             return self.inner_url.request()
         elif self.scheme == "data":
@@ -138,6 +140,20 @@ class URL:
                     break
                 header, value = line.split(":", 1)
                 response_headers[header.casefold()] = value.strip()
+
+            
+            if status.startswith("3") and "location" in response_headers:
+                if redirects >= MAX_REDIRECTS:
+                    raise Exception("Too many redirects")
+
+                redirect_url = response_headers["location"]
+                s.close()
+                URL.socket_cache.pop(cache_key, None)
+
+                if redirect_url.startswith("/"):
+                    redirect_url = f"{self.scheme}://{self.host}{redirect_url}"
+
+                return URL(redirect_url).request(redirects=redirects+1)
 
             if response_headers.get("transfer-encoding") == "chunked":
                 content = read_chunked(response)
