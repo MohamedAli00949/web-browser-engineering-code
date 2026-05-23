@@ -4,11 +4,24 @@ import os
 import gzip
 import time
 import tkinter
+from tkinter import font
 
 DEFAULT_FILE = "test/index.html"
 WIDTH, HEIGHT = 800, 600
 HSTEP, VSTEP = 13, 18
 SCROLL_STEP = 100
+
+FONTS = {}
+
+
+def get_font(size, weight, style):
+    key = (size, weight, style)
+    if key not in FONTS:
+        f = font.Font(size=size, weight=weight, slant=style)
+        label = tkinter.Label(font=f)
+        FONTS[key] = (f, label)
+
+    return FONTS[key][0]
 
 
 def read_chunked(response):
@@ -69,23 +82,9 @@ def parse_cache_control(response_headers):
     return cacheable, max_age
 
 
-def layout(text):
-    display_list = []
-    cursor_x, cursor_y = HSTEP, VSTEP
-    for c in text:
-        display_list.append((cursor_x, cursor_y, c))
-        # if c == "\n":
-        if cursor_x >= WIDTH - HSTEP:
-            cursor_y += VSTEP
-            cursor_x = HSTEP
-        else:
-            cursor_x += HSTEP
-
-    return display_list
-
-
 def lex(body):
-    text = ""
+    out = []
+    buffer = ""
     in_tag = False
     in_entity = False
     entity = ""
@@ -95,13 +94,13 @@ def lex(body):
             if c == ";":
                 if entity == "lt":
                     # print("<", end="")
-                    text += "<"
+                    buffer += "<"
                 elif entity == "gt":
                     # print(">", end="")
-                    text += ">"
+                    buffer += ">"
                 else:
                     # print("&" + entity + ";", end="")
-                    text += "&" + entity + ";"
+                    buffer += "&" + entity + ";"
                 in_entity = False
                 entity = ""
             else:
@@ -111,13 +110,22 @@ def lex(body):
             entity = ""
         elif c == "<":
             in_tag = True
+            if buffer:
+                out.append(Text(buffer))
+            buffer = ""
         elif c == ">":
             in_tag = False
-        elif not in_tag:
+            out.append(Tag(buffer))
+            buffer = ""
+        else:
             # print(c, end="")
-            text += c
+            buffer += c
 
-    return text
+    if not in_tag and buffer:
+        out.append(Text(buffer))
+
+    return out
+
 
 class URL:
     socket_cache = {}
@@ -288,6 +296,109 @@ class URL:
             return content
 
 
+class Layout:
+    def __init__(
+        self,
+        tokens,
+    ):
+        self.line = []
+        self.display_list = []
+        self.weight = "normal"
+        self.style = "roman"
+        self.cursor_x, self.cursor_y = HSTEP, VSTEP
+        self.size = 12
+        self.word_font = font.Font(
+            family="Times", size=self.size, weight=self.weight, slant=self.style
+        )
+
+        for tok in tokens:
+            self.token(tok)
+
+        self.flush()
+
+    def token(self, tok):
+        if isinstance(tok, Text):
+            for word in tok.text.split():
+                self.word_font = font.Font(
+                    family="Times",
+                    size=self.size,
+                    weight=self.weight,
+                    slant=self.style,
+                )
+                self.word(word)
+
+        elif tok.tag == "i":
+            self.style = "italic"
+        elif tok.tag == "/i":
+            self.style = "roman"
+        elif tok.tag == "b":
+            self.weight = "bold"
+        elif tok.tag == "/b":
+            self.weight = "normal"
+        elif tok.tag == "br":
+            self.flush()
+            self.cursor_x = HSTEP
+            self.cursor_y += self.word_font.metrics("linespace") * 1.25
+        elif tok.tag == "p" or tok.tag == "div":
+            self.flush()
+            self.cursor_y += VSTEP
+        elif tok.tag == "pre":
+            self.style = "roman"
+            self.cursor_x = HSTEP
+            self.cursor_y += self.word_font.metrics("linespace") * 1.25
+        elif tok.tag == "h1":
+            self.flush()
+            self.size += 20
+            self.cursor_x = HSTEP
+            self.cursor_y += self.word_font.metrics("linespace") * 3.5
+        elif tok.tag == "h2":
+            self.flush()
+            self.size += 10
+            self.cursor_x = HSTEP
+            self.cursor_y += self.word_font.metrics("linespace") * 2.5
+        elif tok.tag == "h3":
+            self.flush()
+            self.size += 5
+            self.cursor_x = HSTEP
+            self.cursor_y += self.word_font.metrics("linespace") * 1.75
+        elif tok.tag == "/h1":
+            self.size -= 20
+        elif tok.tag == "/h2":
+            self.size -= 10
+        elif tok.tag == "/h3":
+            self.size -= 5
+        elif tok.tag == "small":
+            self.size -= 2
+        elif tok.tag == "/small":
+            self.size += 2
+        elif tok.tag == "big":
+            self.size += 4
+        elif tok.tag == "/big":
+            self.size -= 4
+
+    def word(self, word):
+        font = get_font(self.size, self.weight, self.style)
+        if self.cursor_x + self.word_font.measure(word) > WIDTH - HSTEP:
+            self.flush()
+        self.line.append((self.cursor_x, word, self.word_font))
+        self.cursor_x += self.word_font.measure(word) + self.word_font.measure(" ")
+        
+
+    def flush(self):
+        if not self.line:
+            return
+        max_ascent = max([f.metrics("ascent") for x, word, f in self.line])
+        baseline = self.cursor_y * 1.25 + max_ascent
+
+        for x, word, f in self.line:
+            y = baseline - f.metrics("ascent")
+            self.display_list.append((x, y, word, f))
+
+        max_descent = max(f.metrics("descent") for x, word, f in self.line)
+        self.cursor_y = baseline + max_descent * 1.25
+        self.cursor_x = HSTEP 
+        self.line = []
+
 class Browser:
     def __init__(self):
         self.window = tkinter.Tk()
@@ -297,6 +408,14 @@ class Browser:
         self.scroll = 0
         self.window.bind("<Up>", self.scrollup)
         self.window.bind("<Down>", self.scrolldown)
+
+        # print("fonts: ", font.families())
+        self.bi_times = font.Font(
+            family="Times",
+            size=16,
+            weight="bold",
+            slant="italic",
+        )
 
     def scrollup(self, e):
         self.scroll -= SCROLL_STEP
@@ -308,21 +427,36 @@ class Browser:
 
     def draw(self):
         self.canvas.delete("all")
-        for x, y, c in self.display_list:
+        for x, y, c, font in self.display_list:
             if y > (self.scroll - VSTEP) + HEIGHT:
                 continue
             if y + (VSTEP * 2) < self.scroll:
                 continue
-            self.canvas.create_text(x, y - (self.scroll), text=c, anchor="nw")
+            self.canvas.create_text(
+                x, y - (self.scroll), text=c, anchor="nw", font=font
+            )
 
     def load(self, url):
         body = url.request()
         if url.scheme == "view-source":
             self.canvas.create_text(10, 10, text=body, anchor="nw")
         else:
-            text = lex(body)
-            self.display_list = layout(text)
+            # print("body: ", body, "\n")
+            tokens = lex(body)
+            # print("text: ", text, "\n")
+            self.display_list = Layout(tokens).display_list
+            # print("self.display_list: ", self.display_list)
             self.draw()
+
+
+class Text:
+    def __init__(self, text):
+        self.text = text
+
+
+class Tag:
+    def __init__(self, tag):
+        self.tag = tag
 
 
 if __name__ == "__main__":
