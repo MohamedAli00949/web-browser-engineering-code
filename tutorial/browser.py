@@ -58,7 +58,7 @@ def parse_cache_control(response_headers):
     max_age   = seconds to cache, or None if not specified.
     """
     if "cache-control" not in response_headers:
-        return True, None  # no header → assume cacheable, no expiry
+        return True, None
 
     directives = [d.strip() for d in response_headers["cache-control"].split(",")]
     max_age = None
@@ -73,9 +73,7 @@ def parse_cache_control(response_headers):
             except ValueError:
                 cacheable = False
         elif directive == "no-cache":
-            # no-cache means "revalidate", treat as not cacheable for simplicity
             cacheable = False
-        # any other directive → don't cache
         elif directive not in ("public", "private", "must-revalidate"):
             cacheable = False
 
@@ -93,13 +91,10 @@ def lex(body):
         if in_entity:
             if c == ";":
                 if entity == "lt":
-                    # print("<", end="")
                     buffer += "<"
                 elif entity == "gt":
-                    # print(">", end="")
                     buffer += ">"
                 else:
-                    # print("&" + entity + ";", end="")
                     buffer += "&" + entity + ";"
                 in_entity = False
                 entity = ""
@@ -194,7 +189,6 @@ class URL:
             with open(self.path, "r", encoding="utf8") as f:
                 return f.read()
         else:
-            # ── cache lookup ───────────────────────────────────────────────
             key = cache_key(self.scheme, self.host, self.path)
             if key in URL.response_cache:
                 entry = URL.response_cache[key]
@@ -202,7 +196,6 @@ class URL:
                     return entry["content"]
                 else:
                     del URL.response_cache[key]
-            # ──────────────────────────────────────────────────────────────
 
             socket_key = (self.host, self.port)
 
@@ -296,12 +289,115 @@ class URL:
             return content
 
 
-class Layout:
-    def __init__(
-        self,
-        tokens,
-    ):
-        self.line = []
+class DocumentLayout:
+    def __init__(self, node):
+        self.node = node
+        self.parent = None
+        self.children = []
+
+    def paint(self):
+        return []
+
+    def layout(self):
+        self.width = WIDTH - 2 * HSTEP
+        self.x = HSTEP
+        self.y = VSTEP
+
+        child = BlockLayout(self.node, self, None)
+        self.children.append(child)
+        child.layout()
+
+        self.height = child.height
+
+
+BLOCK_ELEMENTS = [
+    "html",
+    "body",
+    "article",
+    "section",
+    "nav",
+    "aside",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hgroup",
+    "header",
+    "footer",
+    "address",
+    "p",
+    "hr",
+    "pre",
+    "blockquote",
+    "ol",
+    "ul",
+    "menu",
+    "li",
+    "dl",
+    "dt",
+    "dd",
+    "figure",
+    "figcaption",
+    "main",
+    "div",
+    "table",
+    "form",
+    "fieldset",
+    "legend",
+    "details",
+    "summary",
+]
+
+
+class DrawText:
+    def __init__(self, x1, y1, text, font):
+        self.top = y1
+        self.left = x1
+        self.text = text
+        self.font = font
+
+        self.bottom = y1 + font.metrics("linespace")
+
+    def execute(self, scroll, canvas):
+        canvas.create_text(
+            self.left, self.top - scroll, text=self.text, font=self.font, anchor="nw"
+        )
+
+
+class DrawRect:
+    def __init__(self, x1, y1, x2, y2, color):
+        self.top = y1
+        self.left = x1
+        self.bottom = y2
+        self.right = x2
+        self.color = color
+
+    def execute(self, scroll, canvas):
+        canvas.create_rectangle(
+            self.left,
+            self.top - scroll,
+            self.right,
+            self.bottom - scroll,
+            width=0,
+            fill=self.color,
+        )
+
+
+class BlockLayout:
+    def __init__(self, node, parent, previous):
+        self.node = node
+        self.parent = parent
+        self.previous = previous
+        self.children = []
+
+        self.x = None
+        self.y = None
+        self.width = None
+        self.height = None
+
+        # self.line = []
         self.display_list = []
         self.weight = "normal"
         self.style = "roman"
@@ -311,9 +407,52 @@ class Layout:
             family="Times", size=self.size, weight=self.weight, slant=self.style
         )
 
-        self.recurse(tokens)
+        for child in self.children:
+            child.layout()
 
-        self.flush()
+    def paint(self):
+        cmds = []
+        if isinstance(self.node, Element) and self.node.tag == "pre":
+            x2, y2 = self.x + self.width, self.y + self.height
+            rect = DrawRect(self.x, self.y, x2, y2, "gray")
+            cmds.append(rect)
+
+        if self.layout_mode() == "inline":
+            for x, y, word, font in self.display_list:
+                cmds.append(DrawText(x, y, word, font))
+        return cmds
+
+    def layout(self):
+        self.x = self.parent.x
+        self.width = self.parent.width
+
+        if self.previous:
+            self.y = self.previous.y + self.previous.height
+        else:
+            self.y = self.parent.y
+
+        mode = self.layout_mode()
+        if mode == "block":
+            previous = None
+            for child in self.node.children:
+                next = BlockLayout(child, self, previous)
+                self.children.append(next)
+                previous = next
+            for child in self.children:
+                child.layout()
+            self.height = sum([child.height for child in self.children])
+        else:
+            self.cursor_x = 0
+            self.cursor_y = 0
+            self.weight = "normal"
+            self.style = "roman"
+            self.size = 12
+
+            self.line = []
+            self.recurse(self.node)
+            self.flush()
+
+            self.height = self.cursor_y
 
     def recurse(self, tree):
         if isinstance(tree, Text):
@@ -378,11 +517,13 @@ class Layout:
             self.size -= 4
 
     def word(self, word):
-        font = get_font(self.size, self.weight, self.style)
-        if self.cursor_x + self.word_font.measure(word) > WIDTH - HSTEP:
+        f = get_font(self.size, self.weight, self.style)
+        w = f.measure(word)
+        if self.cursor_x + w > self.width:
+            # if self.cursor_x + self.word_font.measure(word) > WIDTH - HSTEP:
             self.flush()
-        self.line.append((self.cursor_x, word, self.word_font))
-        self.cursor_x += self.word_font.measure(word) + self.word_font.measure(" ")
+        self.line.append((self.cursor_x, word, f))
+        self.cursor_x += w + f.measure(" ")
 
     def flush(self):
         if not self.line:
@@ -390,14 +531,35 @@ class Layout:
         max_ascent = max([f.metrics("ascent") for x, word, f in self.line])
         baseline = self.cursor_y * 1.25 + max_ascent
 
-        for x, word, f in self.line:
-            y = baseline - f.metrics("ascent")
+        for rel_x, word, f in self.line:
+            x = self.x + rel_x
+            y = self.y + baseline - f.metrics("ascent")
             self.display_list.append((x, y, word, f))
 
-        max_descent = max(f.metrics("descent") for x, word, f in self.line)
+        max_descent = max(f.metrics("descent") for _, _, f in self.line)
         self.cursor_y = baseline + max_descent * 1.25
         self.cursor_x = HSTEP
         self.line = []
+
+    def layout_intermediate(self):
+        previous = None
+        for child in self.node.children:
+            next = BlockLayout(child, self, previous)
+            self.children.append(next)
+            previous = next
+
+    def layout_mode(self):
+        if isinstance(self.node, Text):
+            return "inline"
+        elif any(
+            [
+                isinstance(child, Element) and child.tag in BLOCK_ELEMENTS
+                for child in self.node.children
+            ]
+        ):
+            return "block"
+        else:
+            return "inline"
 
 
 class Browser:
@@ -428,14 +590,12 @@ class Browser:
 
     def draw(self):
         self.canvas.delete("all")
-        for x, y, c, font in self.display_list:
-            if y > (self.scroll - VSTEP) + HEIGHT:
+        for cmd in self.display_list:
+            if cmd.top > self.scroll + HEIGHT:
                 continue
-            if y + (VSTEP * 2) < self.scroll:
+            if cmd.bottom < self.scroll:
                 continue
-            self.canvas.create_text(
-                x, y - (self.scroll), text=c, anchor="nw", font=font
-            )
+            cmd.execute(self.scroll, self.canvas)
 
     def load(self, url):
         body = url.request()
@@ -444,7 +604,11 @@ class Browser:
         else:
             self.nodes = HTMLParser(body).parse()
             print_tree(self.nodes)
-            self.display_list = Layout(self.nodes).display_list
+            # self.display_list = Layout(self.nodes).display_list
+            self.document = DocumentLayout(self.nodes)
+            self.document.layout()
+            self.display_list = []
+            paint_tree(self.document, self.display_list)
             self.draw()
 
 
@@ -473,6 +637,14 @@ def print_tree(node, indent=0):
     print(" " * indent, node)
     for child in node.children:
         print_tree(child, indent + 2)
+
+
+def paint_tree(layout_object, display_list):
+    display_list.extend(layout_object.paint())
+
+    for child in layout_object.children:
+        paint_tree(child, display_list)
+
 
 class HTMLParser:
     def __init__(self, body):
