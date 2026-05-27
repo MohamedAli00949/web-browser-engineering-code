@@ -79,49 +79,6 @@ def parse_cache_control(response_headers):
 
     return cacheable, max_age
 
-
-def lex(body):
-    out = []
-    buffer = ""
-    in_tag = False
-    in_entity = False
-    entity = ""
-
-    for c in body:
-        if in_entity:
-            if c == ";":
-                if entity == "lt":
-                    buffer += "<"
-                elif entity == "gt":
-                    buffer += ">"
-                else:
-                    buffer += "&" + entity + ";"
-                in_entity = False
-                entity = ""
-            else:
-                entity += c
-        elif c == "&" and not in_tag:
-            in_entity = True
-            entity = ""
-        elif c == "<":
-            in_tag = True
-            if buffer:
-                out.append(Text(buffer))
-            buffer = ""
-        elif c == ">":
-            in_tag = False
-            out.append(Element(buffer))
-            buffer = ""
-        else:
-            # print(c, end="")
-            buffer += c
-
-    if not in_tag and buffer:
-        out.append(Text(buffer))
-
-    return out
-
-
 class URL:
     socket_cache = {}
     response_cache = {}
