@@ -961,8 +961,10 @@ class Browser:
         self.canvas.pack()
         self.display_list = []
         self.scroll = 0
+        self.url = None
         self.window.bind("<Up>", self.scrollup)
         self.window.bind("<Down>", self.scrolldown)
+        self.window.bind("<Button-1>", self.click)
 
         # print("fonts: ", font.families())
         self.bi_times = font.Font(
@@ -991,6 +993,7 @@ class Browser:
             cmd.execute(self.scroll, self.canvas)
 
     def load(self, url):
+        self.url = url
         body = url.request()
         if url.scheme == "view-source":
             self.canvas.create_text(10, 10, text=body, anchor="nw")
@@ -1020,6 +1023,27 @@ class Browser:
             paint_tree(self.document, self.display_list)
             self.draw()
 
+    def click(self, e):
+        x, y = e.x, e.y
+
+        y += self.scroll
+
+        objs = [
+            obj for obj in tree_to_list(self.document, [])
+            if obj.x <= x < obj.x + obj.width
+            and obj.y <= y < obj.y + obj.height
+        ]
+
+        if not objs: return
+        elt = objs[-1].node
+
+        while elt: 
+            if isinstance(elt, Text):
+                pass
+            elif elt.tag == 'a' and 'href' in elt.attributes:
+                url = self.url.resolve(elt.attributes['href'])
+                return self.load(url)
+            elt = elt.parent
 
 if __name__ == "__main__":
     import sys
