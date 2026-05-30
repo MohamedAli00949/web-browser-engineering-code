@@ -133,6 +133,14 @@ class URL:
                 else:
                     self.port = 443 if self.scheme == "https" else 80
 
+    def __str__(self):
+        port_part = ":" + str(self.port)
+        if self.scheme == "https" and self.port == 443:
+            port_part = ""
+        if self.scheme == "http" and self.port == 80:
+            port_part = ""
+        return self.scheme + "://" + self.host + port_part + self.path
+
     def request(self, redirects=0):
         MAX_REDIRECTS = 10
 
@@ -505,8 +513,7 @@ class BlockLayout:
             child.layout()
 
     def self_rect(self):
-        return Rect(self.x, self.y, 
-                self.x + self.width, self.y + self.height)
+        return Rect(self.x, self.y, self.x + self.width, self.y + self.height)
 
     def paint(self):
         cmds = []
@@ -1000,6 +1007,7 @@ def cascade_priority(rule):
 
 class Tab:
     def __init__(self, tab_height):
+        self.history = []
         self.display_list = []
         self.scroll = 0
         self.url = None
@@ -1029,6 +1037,7 @@ class Tab:
             cmd.execute(self.scroll - offset, canvas)
 
     def load(self, url):
+        self.history.append(url)
         self.url = url
         body = url.request()
         if url.scheme == "view-source":
@@ -1058,8 +1067,8 @@ class Tab:
             self.display_list = []
             paint_tree(self.document, self.display_list)
 
-    def click(self, e):
-        x, y = e.x, e.y
+    def click(self, x, y):
+        # x, y = e.x, e.y
 
         y += self.scroll
 
@@ -1081,6 +1090,12 @@ class Tab:
                 return self.load(url)
             elt = elt.parent
 
+    def go_back(self):
+        if len(self.history) > 1:
+            self.history.pop()
+            back = self.history.pop()
+            self.load(back)
+
 
 class Chrome:
     def __init__(self, browser):
@@ -1091,6 +1106,8 @@ class Chrome:
         self.tabbar_top = 0
         self.tabbar_bottom = self.font_height + 2 * self.padding
         self.bottom = self.tabbar_bottom
+        self.focus = None
+        self.address_bar = ""
 
         plus_width = self.font.measure("+") + 2 * self.padding
         self.newtab_rect = Rect(
@@ -1098,6 +1115,24 @@ class Chrome:
             self.padding,
             self.padding + plus_width,
             self.padding + self.font_height,
+        )
+
+        self.urlbar_top = self.tabbar_bottom
+        self.urlbar_bottom = self.urlbar_top + self.font_height + 2 * self.padding
+        self.bottom = self.urlbar_bottom
+
+        back_width = self.font.measure("<") + 2 * self.padding
+        self.back_rect = Rect(
+            self.padding,
+            self.urlbar_top + self.padding,
+            self.padding + back_width,
+            self.urlbar_bottom - self.padding,
+        )
+        self.address_rect = Rect(
+            self.back_rect.top + self.padding,
+            self.urlbar_top + self.padding,
+            WIDTH - self.padding,
+            self.urlbar_bottom - self.padding,
         )
 
     def tab_rect(self, i):
@@ -1114,11 +1149,8 @@ class Chrome:
     def paint(self):
         cmds = []
 
-        cmds.append(DrawRect(
-            Rect(0, 0, WIDTH, self.bottom), 
-            "white"))
-        cmds.append(DrawLine(0, self.bottom, WIDTH, 
-            self.bottom, "black", 1))
+        cmds.append(DrawRect(Rect(0, 0, WIDTH, self.bottom), "white"))
+        cmds.append(DrawLine(0, self.bottom, WIDTH, self.bottom, "black", 1))
 
         cmds.append(DrawOutline(self.newtab_rect, "black", 1))
         cmds.append(
@@ -1157,17 +1189,84 @@ class Chrome:
                     )
                 )
 
+        cmds.append(DrawOutline(self.back_rect, "black", 1))
+        # cmds.append(
+        #     DrawText(
+        #         self.back_rect.left + self.padding,
+        #         self.back_rect.top,
+        #         "<",
+        #         self.font,
+        #         "black",
+        #     )
+        # )
+
+        cmds.append(DrawOutline(self.address_rect, "black", 1))
+        url = str(self.browser.active_tab.url)
+        # cmds.append(
+        #     DrawText(
+        #         self.address_rect.left + self.padding,
+        #         self.address_rect.top,
+        #         url,
+        #         self.font,
+        #         "black",
+        #     )
+        # )
+
+        if self.focus == "address_bar":
+            cmds.append(
+                DrawText(
+                    self.address_rect.left + self.padding,
+                    self.address_rect.top,
+                    self.address_bar,
+                    self.font,
+                    "black",
+                )
+            )
+            w = self.font.measure(self.address_bar)
+            cmds.append(DrawLine(
+                self.address_rect.left + self.padding + w,
+                self.address_rect.top,
+                self.address_rect.left + self.padding + w,
+                self.address_rect.bottom,
+                "red", 1))
+        else:
+            url = str(self.browser.active_tab.url)
+            cmds.append(
+                DrawText(
+                    self.address_rect.left + self.padding,
+                    self.address_rect.top,
+                    url,
+                    self.font,
+                    "black",
+                )
+            )
+
         return cmds
+
+    def keypress(self, char):
+        if self.focus == "address_bar":
+            self.address_bar += char
+    
+    def enter(self):
+        if self.focus == "address_bar":
+            self.browser.active_tab.load(URL(self.address_bar))
+            self.focus = None
 
     def click(self, x, y):
         if self.newtab_rect.containsPoint(x, y):
             # self.browser.new_tab(URL("https://example.org"))
             self.browser.new_tab(URL("http://localhost:8000"))
+        elif self.back_rect.containsPoint(x, y):
+            self.browser.active_tab.go_back()
+        elif self.address_rect.containsPoint(x, y):
+            self.focus = "address_bar"
+            self.address_bar = ""
         else:
             for i, tab in enumerate(self.browser.tabs):
                 if self.tab_rect(i).containsPoint(x, y):
                     self.browser.active_tab = tab
                     break
+
 
 class Rect:
     def __init__(self, left, top, right, bottom):
@@ -1192,6 +1291,9 @@ class Browser:
         self.window.bind("<Up>", self.handle_up)
         self.window.bind("<Down>", self.handle_down)
         self.window.bind("<Button-1>", self.handle_click)
+        self.window.bind("<Key>", self.handle_key)
+        self.window.bind("<Return>", self.handle_enter)
+
         self.chrome = Chrome(self)
 
     def handle_up(self, e):
@@ -1208,6 +1310,16 @@ class Browser:
         else:
             tab_y = e.y - self.chrome.bottom
             self.active_tab.click(e.x, tab_y)
+        self.draw()
+
+    def handle_key(self, e):
+        if len(e.char) == 0: return
+        if not (0x20 <= ord(e.char) < 0x7f): return
+        self.chrome.keypress(e.char)
+        self.draw()
+
+    def handle_enter(self, e):
+        self.chrome.enter()
         self.draw()
 
     def draw(self):
