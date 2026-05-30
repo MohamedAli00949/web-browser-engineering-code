@@ -4,6 +4,7 @@ from html_parser import Element
 from constants import *
 from html_parser import Text
 
+
 class CSSParser:
     def __init__(self, s):
         self.s = s
@@ -93,6 +94,7 @@ class CSSParser:
                     break
         return rules
 
+
 class TagSelector:
     def __init__(self, tag):
         self.tag = tag
@@ -117,7 +119,9 @@ class DescendantSelector:
             node = node.parent
         return False
 
+
 FONTS = {}
+
 
 def get_font(size, weight, style):
     key = (size, weight, style)
@@ -127,6 +131,7 @@ def get_font(size, weight, style):
         FONTS[key] = (f, label)
 
     return FONTS[key][0]
+
 
 def style(node, rules):
     node.style = {}
@@ -161,9 +166,11 @@ def style(node, rules):
     for child in node.children:
         style(child, rules)
 
+
 def cascade_priority(rule):
     selector, body = rule
     return selector.priority
+
 
 class Rect:
     def __init__(self, left, top, right, bottom):
@@ -196,6 +203,8 @@ class DocumentLayout:
 
         self.height = child.height
 
+    def should_paint(self):
+        return True
 
 
 class DrawText:
@@ -311,6 +320,70 @@ class TextLayout:
         color = self.node.style["color"]
         return [DrawText(self.x, self.y, self.word, self.font, color)]
 
+    def should_paint(self):
+        return True
+
+
+class InputLayout:
+    def __init__(self, node, parent, previous):
+        self.node = node
+        self.children = []
+        self.parent = parent
+        self.previous = previous
+
+        self.font = None
+        self.weight = 0
+        self.style = "roman"
+        self.size = 0
+        self.height = 0
+        self.x = 0
+        self.y = 0
+
+    def layout(self):
+        self.width = INPUT_WIDTH_PX
+        weight = self.node.style["font-weight"]
+        style = self.node.style["font-style"]
+        if style == "normal":
+            style = "roman"
+        size = int(float(self.node.style["font-size"][:-2]) * 0.75)
+        self.font = get_font(size, weight, style)
+
+        if self.previous:
+            space = self.previous.font.measure(" ")
+            self.x = self.previous.x + space + self.previous.width
+        else:
+            self.x = self.parent.x
+
+        self.height = self.font.metrics("linespace")
+
+    def paint(self):
+        cmds = []
+        bgcolor = self.node.style.get("background-color", "transparent")
+
+        if bgcolor != "transparent":
+            rect = DrawRect(self.self_rect(), bgcolor)
+            cmds.append(rect)
+
+        if self.node.tag == "input":
+            text = self.node.attributes.get("value", "")
+        elif self.node.tag == "button":
+            if len(self.node.children) == 1 and isinstance(self.node.children[0], Text):
+                text = self.node.children[0].text
+        else:
+            print("Ignoring HTML contents inside button")
+            text = ""
+
+        color = self.node.style["color"]
+        cmds.append(DrawText(self.x, self.y, text, self.font, color))
+
+        return cmds
+
+    def self_rect(self):
+        return Rect(self.x, self.y, self.x + self.width, self.y + self.height)
+    
+    def should_paint(self):
+        return True
+
 
 class LineLayout:
     def __init__(self, node, parent, previous):
@@ -350,6 +423,9 @@ class LineLayout:
 
     def paint(self):
         return []
+
+    def should_paint(self):
+        return True
 
 
 class BlockLayout:
@@ -397,6 +473,24 @@ class BlockLayout:
 
         return cmds
 
+    def input(self, node):
+        w = INPUT_WIDTH_PX
+        if self.cursor_x + w > self.width:
+            self.new_line()
+        line = self.children[-1]
+        previous_word = line.children[-1] if line.children else None
+        input = InputLayout(node, line, previous_word)
+        line.children.append(input)
+
+        weight = node.style["font-weight"]
+        style = node.style["font-style"]
+        if style == "normal":
+            style = "roman"
+        size = int(float(node.style["font-size"][:-2]) * 0.75)
+        font = get_font(size, weight, style)
+
+        self.cursor_x += w + font.measure(" ")
+
     def layout(self):
         self.x = self.parent.x
         self.width = self.parent.width
@@ -428,8 +522,13 @@ class BlockLayout:
             for word in node.text.split():
                 self.word(node, word)
         else:
-            for child in node.children:
-                self.recurse(child)
+            if node.tag == "br":
+                self.new_line()
+            elif node.tag == "input" or node.tag == "button":
+                self.input(node)
+            else:
+                for child in node.children:
+                    self.recurse(child)
 
     def open_tag(self, tag):
         if tag == "i":
@@ -528,6 +627,12 @@ class BlockLayout:
             ]
         ):
             return "block"
+        elif self.node.children or self.node.tag == "input":
+            return "inline"
         else:
             return "inline"
 
+    def should_paint(self):
+        return isinstance(self.node, Text) or (
+            self.node.tag != "input" and self.node.tag != "button"
+        )
