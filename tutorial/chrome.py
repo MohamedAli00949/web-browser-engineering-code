@@ -150,6 +150,8 @@ class Chrome:
     def keypress(self, char):
         if self.focus == "address_bar":
             self.address_bar += char
+            return True
+        return False
     
     def enter(self):
         if self.focus == "address_bar":
@@ -170,3 +172,6 @@ class Chrome:
                 if self.tab_rect(i).containsPoint(x, y):
                     self.browser.active_tab = tab
                     break
+
+    def blur(self):
+        self.focus = None

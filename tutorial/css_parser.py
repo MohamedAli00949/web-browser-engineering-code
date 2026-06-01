@@ -366,6 +366,9 @@ class InputLayout:
 
         if self.node.tag == "input":
             text = self.node.attributes.get("value", "")
+            if self.node.is_focused:
+                cx = self.x + self.font.measure(text)
+                cmds.append(DrawLine(cx, self.y, cx, self.y + self.height, "black", 1))
         elif self.node.tag == "button":
             if len(self.node.children) == 1 and isinstance(self.node.children[0], Text):
                 text = self.node.children[0].text

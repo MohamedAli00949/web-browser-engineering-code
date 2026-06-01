@@ -9,6 +9,8 @@ class Tab:
         self.display_list = []
         self.scroll = 0
         self.url = None
+        self.focus = None
+        self.rules = []
         self.tab_height = tab_height
 
         # print("fonts: ", font.families())
@@ -43,7 +45,7 @@ class Tab:
         else:
             self.nodes = HTMLParser(body).parse()
             # print_tree(self.nodes)
-            rules = DEFAULT_STYLE_SHEET.copy()
+            self.rules = DEFAULT_STYLE_SHEET.copy()
             links = [
                 node.attributes["href"]
                 for node in tree_to_list(self.nodes, [])
@@ -58,15 +60,12 @@ class Tab:
                     style_body = style_url.request()
                 except:
                     continue
-                rules.extend(CSSParser(style_body).parse())
-            style(self.nodes, sorted(rules, key=cascade_priority))
-            self.document = DocumentLayout(self.nodes)
-            self.document.layout()
-            self.display_list = []
-            paint_tree(self.document, self.display_list)
+                self.rules.extend(CSSParser(style_body).parse())
+            self.render()
 
     def click(self, x, y):
         # x, y = e.x, e.y
+        self.focus = None
 
         y += self.scroll
 
@@ -83,6 +82,13 @@ class Tab:
         while elt:
             if isinstance(elt, Text):
                 pass
+            elif elt.tag == "input":
+                elt.attributes['value'] = ""
+                if self.focus:
+                    self.focus.is_focused = False
+                self.focus = elt
+                self.focus.is_focused = True
+                return self.render()
             elif elt.tag == "a" and "href" in elt.attributes:
                 url = self.url.resolve(elt.attributes["href"])
                 return self.load(url)
@@ -93,4 +99,22 @@ class Tab:
             self.history.pop()
             back = self.history.pop()
             self.load(back)
+
+    def render(self):
+        style(self.nodes, sorted(self.rules, key=cascade_priority))
+        self.document = DocumentLayout(self.nodes)
+        self.document.layout()
+        self.display_list = []
+        paint_tree(self.document, self.display_list)
+
+    def keypress(self, char):
+        if self.focus:
+        #     self.focus.attributes["value"] += char
+        #     self.render()
+            if self.focus.tag == "input":
+                self.focus.attributes["value"] = (
+                    self.focus.attributes.get("value", "") + char
+                )
+                self.render()  # or self.draw() depending on your method name
+
 
