@@ -1,5 +1,6 @@
 from css_parser import *
 from html_parser import *
+import urllib.parse
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
@@ -36,10 +37,10 @@ class Tab:
                 continue
             cmd.execute(self.scroll - offset, canvas)
 
-    def load(self, url):
+    def load(self, url, payload=None):
         self.history.append(url)
         self.url = url
-        body = url.request()
+        body = url.request(payload)
         if url.scheme == "view-source":
             self.canvas.create_text(10, 10, text=body, anchor="nw")
         else:
@@ -89,10 +90,31 @@ class Tab:
                 self.focus = elt
                 self.focus.is_focused = True
                 return self.render()
+            elif elt.tag == "button":
+                while elt:
+                    if elt.tag == 'form' and "action" in elt.attributes:
+                        return self.submit_form(elt)
+                    elt = elt.parent
             elif elt.tag == "a" and "href" in elt.attributes:
                 url = self.url.resolve(elt.attributes["href"])
                 return self.load(url)
             elt = elt.parent
+
+    def submit_form(self, elt):
+        inputs = [node for node in tree_to_list(elt, []) 
+                if isinstance(node, Element) and node.tag == "input" and "name" in node.attributes]
+
+        body = ""
+        for input in inputs:
+            name = input.attributes["name"]
+            value = input.attributes.get("value", "")
+            name = urllib.parse.quote(name)
+            value = urllib.parse.quote(value)
+            body += f"&{name}={value}"
+        body = body[1:]
+
+        url = self.url.resolve(elt.attributes["action"])
+        self.load(url, body)
 
     def go_back(self):
         if len(self.history) > 1:
@@ -109,12 +131,10 @@ class Tab:
 
     def keypress(self, char):
         if self.focus:
-        #     self.focus.attributes["value"] += char
-        #     self.render()
             if self.focus.tag == "input":
                 self.focus.attributes["value"] = (
                     self.focus.attributes.get("value", "") + char
                 )
-                self.render()  # or self.draw() depending on your method name
+                self.render()
 
 
