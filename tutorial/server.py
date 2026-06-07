@@ -56,7 +56,10 @@ def do_request(method, url, headers, body):
     elif method == "POST" and url == "/add":
         params = form_decode(body)
         return "200 OK", add_entry(params, out)
-    elif method == "GET" and url.endswith(".js"):   # ← add this
+    elif method == "GET" and url == "/comment.js":
+        with open("comment.js") as f:
+            return "200 OK", f.read()
+    elif method == "GET" and url.endswith(".js"):
         try:
             filename = url.lstrip("/")
             with open(filename, "r") as f:
@@ -83,7 +86,7 @@ def form_decode(body):
     return params
 
 def add_entry(params, out):
-    if 'guest' in params:
+    if 'guest' in params and len(params['guest']) <= 100:
         ENTRIES.append(params['guest'])
     return show_comments(out)
 
