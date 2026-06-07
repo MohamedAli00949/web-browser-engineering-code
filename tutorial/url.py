@@ -180,11 +180,15 @@ class URL:
                 s.send(request.encode("utf8") + payload_encoded)
             else:
                 request += "\r\n"
-                s.send(request.encode("utf8"))
+                try:
+                    s.send(request.encode("utf8"))
+                    response = s.makefile("rb")
+                    statusLine = response.readline().decode("utf8")
+                except (ConnectionAbortedError, BrokenPipeError, OSError):
+                    s.close()
+                    URL.socket_cache.pop(socket_key, None)
+                    return self.request(redirects)
 
-            response = s.makefile("rb")
-
-            statusLine = response.readline().decode("utf8")
             version, status, explanation = statusLine.split(" ", 2)
 
             response_headers = {}
