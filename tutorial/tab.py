@@ -70,7 +70,7 @@ class Tab:
                     print("Failed to load script: ", script_url, "Error:", e)  # ← print the error
                     continue
                 result = self.js.run(script_url, script_body)
-                print("Script returned: ", dukpy.evaljs(result))
+                print("Script returned: ", result)
 
             links = [
                 node.attributes["href"]

@@ -11,6 +11,8 @@ class JSContext:
     self.interp = dukpy.JSInterpreter()
     self.interp.export_function("log", print)
     self.interp.export_function("querySelectorAll", self.querySelectorAll)
+    self.interp.export_function("getAttribute", self.getAttribute)
+    self.interp.export_function("innerHTML", self.innerHTML_set)
     self.interp.evaljs(RUNTIME_JS)
 
     self.node_to_handle = {}
@@ -44,8 +46,13 @@ class JSContext:
   
   def dispatch_event(self, type, elt):
     handle = self.node_to_handle.get(elt, -1)
-    do_default = self.interp.evaljs(EVENT_DISPATCH_JS, type=type, handle=handle)
-
+    try:
+        do_default = self.interp.evaljs(
+            EVENT_DISPATCH_JS, type=type, handle=handle
+        )
+    except dukpy.JSRuntimeError as e:
+        print("JS error in dispatch_event:", e)
+        return False  # allow default behavior to continue
     return not do_default
 
   def innerHTML_set(self, handle, s):
