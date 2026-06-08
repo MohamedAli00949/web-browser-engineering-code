@@ -60,6 +60,7 @@ def parse_cache_control(response_headers):
 
     return cacheable, max_age
 
+COOKIE_JAR = {}
 
 class URL:
     socket_cache = {}
@@ -172,6 +173,11 @@ class URL:
             request += "User-Agent: MoBrowserFromWebBrowserEngineeringBook/1.0\r\n"
             request += "Accept-Encoding: identity\r\n"
 
+            if self.host in COOKIE_JAR:
+                cookie = COOKIE_JAR[self.host]
+                request += f"Cookie: {cookie}\r\n"
+                print("Cookie: ", cookie, "for host: ", self.host, COOKIE_JAR)
+
             if payload:
                 payload_encoded = payload.encode("utf8")
                 request += "Content-Type: application/x-www-form-urlencoded\r\n"
@@ -182,12 +188,13 @@ class URL:
                 request += "\r\n"
                 try:
                     s.send(request.encode("utf8"))
-                    response = s.makefile("rb")
-                    statusLine = response.readline().decode("utf8")
                 except (ConnectionAbortedError, BrokenPipeError, OSError):
                     s.close()
                     URL.socket_cache.pop(socket_key, None)
                     return self.request(redirects)
+
+            response = s.makefile("rb")
+            statusLine = response.readline().decode("utf8")
 
             version, status, explanation = statusLine.split(" ", 2)
 
@@ -211,6 +218,11 @@ class URL:
                     redirect_url = f"{self.scheme}://{self.host}{redirect_url}"
 
                 return URL(redirect_url).request(redirects=redirects + 1)
+            
+            if "set-cookie" in response_headers:
+                cookie = response_headers["set-cookie"]
+                COOKIE_JAR[self.host] = cookie
+                print("set cookie: ", cookie, "for host: ", self.host, COOKIE_JAR)
 
             if response_headers.get("transfer-encoding") == "chunked":
                 content = read_chunked(response)
