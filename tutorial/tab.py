@@ -40,9 +40,9 @@ class Tab:
             cmd.execute(self.scroll - offset, canvas)
 
     def load(self, url, payload=None):
+        headers, body = url.request(self.url, payload)
         self.history.append(url)
         self.url = url
-        body = url.request(payload)
         print("html: ", body)
 
         if url.scheme == "view-source":
@@ -64,7 +64,7 @@ class Tab:
                 script_url = url.resolve(script)
                 print("Loading script: ", script_url)
                 try:
-                    script_body = script_url.request()
+                    header, script_body = script_url.request(script_url)
                     print("Script body: ", script_body)
                 except Exception as e:
                     print("Failed to load script: ", script_url, "Error:", e)  # ← print the error
@@ -83,7 +83,7 @@ class Tab:
             for link in links:
                 style_url = url.resolve(link)
                 try:
-                    style_body = style_url.request()
+                    header, style_body = style_url.request(style_url)
                 except Exception as e:
                     print("Failed to load script: ", style_url, "Error:", e)  # ← print the error
                     continue

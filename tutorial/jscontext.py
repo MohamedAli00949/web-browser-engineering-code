@@ -73,5 +73,5 @@ class JSContext:
     if full_url.origin() != self.tab.url.origin():
       raise Exception("Cross-origin XML request not allowed") 
 
-    headers, out = full_url.request(body)
+    headers, out = full_url.request(self.tab.url, body)
     return out
