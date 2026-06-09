@@ -98,8 +98,12 @@ def do_request(session, method, url, headers, body):
 def show_comments(session, out):
     # ...
     if "user" in session:
+        nonce = str(random.random())[2:]
+        session["nonce"] = nonce
+
         out += "<h1>Hello, " + session["user"] + "</h1>"
         out += "<form action=add method=post>"
+        out += "<input name=nonce type=hidden value=" + nonce + ">"
         out += "<p><input name=guest></p>"
         out += "<p><button>Sign the book!</button></p>"
         out += "</form>"
@@ -126,6 +130,8 @@ def form_decode(body):
 
 def add_entry(session, params, out):
     if "user" not in session: return
+    if "nonce" not in session or "nonce" not in params: return
+    if session["nonce"] != params["nonce"]: return
     if 'guest' in params and len(params['guest']) <= 100:
         ENTRIES.append((params['guest'], session['user']))
     return show_comments(session, out)

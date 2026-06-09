@@ -268,3 +268,6 @@ class URL:
             return URL(f"{self.scheme}:{url}")
         else:
             return URL(f"{self.scheme}://{self.host}:{self.port}{url}")
+
+    def origin(self):
+        return f"{self.scheme}://{self.host}:{self.port}"
