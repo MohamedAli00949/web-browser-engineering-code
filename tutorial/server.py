@@ -49,6 +49,9 @@ def handle_connection(conx):
     if 'cookie' not in headers:
         response += "Set-Cookie: token={}; SameSite=Lax\r\n".format(token)
 
+    csp = "default-src http://localhost:8000"
+    response += "Content-Security-Policy: {}\r\n".format(csp)
+
     response += "\r\n" + body
     conx.send(response.encode('utf8'))
     conx.close()
@@ -118,6 +121,8 @@ def show_comments(session, out):
 
     out += "<strong></strong>"
     out += "<script src=/comment.js></script>"
+    out += "<script src=https://example.com/evil.js></script>"
+
     # ...
     return out
 

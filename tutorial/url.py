@@ -265,7 +265,7 @@ class URL:
                     expires = (time.time() + max_age) if max_age is not None else None
                     URL.response_cache[key] = {"content": content, "expires": expires}
 
-            return content
+            return response_headers, content
 
     def resolve(self, url):
         if "://" in url:
