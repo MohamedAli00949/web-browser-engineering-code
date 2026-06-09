@@ -1,6 +1,7 @@
 import socket
 import urllib
 import random
+import html
 
 s = socket.socket(
     family=socket.AF_INET,
@@ -112,8 +113,8 @@ def show_comments(session, out):
         out += "<a href=/login>Sign in to write in the guest book</a>"
 
     for entry, who in ENTRIES:
-        out += "<p>" + entry + "\n"
-        out += "<i>by " + who + "</i></p>"
+        out += "<p>" + html.escape(entry) + "\n"
+        out += "<i>by " + html.escape(who) + "</i></p>"
 
     out += "<strong></strong>"
     out += "<script src=/comment.js></script>"
