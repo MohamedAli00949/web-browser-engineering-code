@@ -68,7 +68,7 @@ class URL:
     def __init__(self, url):
         if url.startswith("view-source:"):
             self.scheme = "view-source"
-            self.inner_url = URL(url[len("view-source:") :])
+            self.inner_url = URL(url[len("view-source:"):])
 
             self.host = None
             self.port = None
@@ -77,7 +77,7 @@ class URL:
         elif url.startswith("data:"):
             self.scheme = "data"
 
-            url = url[len("data:") :]
+            url = url[len("data:"):]
             self.mimetype, self.data = url.split(",", 1)
 
             self.host = None
@@ -122,7 +122,7 @@ class URL:
             port_part = ""
         return self.scheme + "://" + self.host + port_part + self.path
 
-    def request(self, redirects=0):
+    def request(self, payload=None, redirects=0):
         MAX_REDIRECTS = 10
 
         if self.scheme == "view-source":
@@ -137,7 +137,7 @@ class URL:
                 return f.read()
         else:
             key = cache_key(self.scheme, self.host, self.path)
-            if key in URL.response_cache:
+            if key in URL.response_cache and not payload:
                 entry = URL.response_cache[key]
                 if entry["expires"] is None or time.time() < entry["expires"]:
                     return entry["content"]
@@ -145,8 +145,13 @@ class URL:
                     del URL.response_cache[key]
 
             socket_key = (self.host, self.port)
+            method = "POST" if payload else "GET"
 
-            s = URL.socket_cache.get(socket_key)
+            # Never reuse a cached socket for POST requests
+            if method == "POST":
+                s = None
+            else:
+                s = URL.socket_cache.get(socket_key)
 
             if s is None:
                 s = socket.socket(
@@ -154,40 +159,37 @@ class URL:
                     type=socket.SOCK_STREAM,
                     proto=socket.IPPROTO_TCP,
                 )
-
                 s.connect((self.host, self.port))
 
                 if self.scheme == "https":
                     ctx = ssl.create_default_context()
                     s = ctx.wrap_socket(s, server_hostname=self.host)
 
-            request_headers = {
-                "Host": self.host,
-                "Connection": "keep-alive",
-                "User-Agent": "MoBrowserFromWebBrowserEngineeringBook/1.0",
-                "Accept-Encoding": "identity",
-            }
+            # Build request headers and body, send in one call
+            request = f"{method} {self.path} HTTP/1.1\r\n"
+            request += f"Host: {self.host}\r\n"
+            request += "Connection: close\r\n"
+            request += "User-Agent: MoBrowserFromWebBrowserEngineeringBook/1.0\r\n"
+            request += "Accept-Encoding: identity\r\n"
 
-            request = f"GET {self.path} HTTP/1.1\r\n"
-
-            for header, value in request_headers.items():
-                request += f"{header}: {value}\r\n"
-
-            request += "\r\n"
-
-            s.send(request.encode("utf8"))
+            if payload:
+                payload_encoded = payload.encode("utf8")
+                request += "Content-Type: application/x-www-form-urlencoded\r\n"
+                request += f"Content-Length: {len(payload_encoded)}\r\n"
+                request += "\r\n"
+                s.send(request.encode("utf8") + payload_encoded)
+            else:
+                request += "\r\n"
+                s.send(request.encode("utf8"))
 
             response = s.makefile("rb")
 
             statusLine = response.readline().decode("utf8")
-
             version, status, explanation = statusLine.split(" ", 2)
 
             response_headers = {}
-
             while True:
                 line = response.readline().decode("utf8")
-
                 if line == "\r\n":
                     break
                 header, value = line.split(":", 1)
@@ -208,12 +210,9 @@ class URL:
 
             if response_headers.get("transfer-encoding") == "chunked":
                 content = read_chunked(response)
-
             elif "content-length" in response_headers:
                 content_length = int(response_headers["content-length"])
-
                 content = response.read(content_length)
-
             else:
                 content = response.read()
 
@@ -222,12 +221,15 @@ class URL:
 
             content = content.decode("utf8", errors="replace")
 
-            if response_headers.get("connection", "").lower() == "close":
+            # Always close and remove from cache for POST, or if server requests it
+            if response_headers.get("connection", "").lower() == "close" or method == "POST":
                 s.close()
+                URL.socket_cache.pop(socket_key, None)
             else:
                 URL.socket_cache[socket_key] = s
 
-            if status == "200":
+            # Only cache GET 200 responses
+            if status == "200" and method == "GET":
                 cacheable, max_age = parse_cache_control(response_headers)
                 if cacheable:
                     expires = (time.time() + max_age) if max_age is not None else None

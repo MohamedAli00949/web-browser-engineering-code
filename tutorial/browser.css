@@ -5,3 +5,7 @@ a { color: blue; }
 h1 { font-size: 150%; font-weight: bold; }
 h2 { font-size: 125%; font-weight: bold; }
 h3 { font-size: 110%; font-weight: bold; }
+
+input { font-size: 16px; font-weight: normal; font-style: normal; background-color: lightblue; }
+
+button { font-size: 16px; font-weight: normal; font-style: normal; background-color: orange; }

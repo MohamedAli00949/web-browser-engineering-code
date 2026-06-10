@@ -50,3 +50,5 @@ INHERITED_PROPERTIES = {
     "font-weight": "normal",
     "color": "black",
 }
+
+INPUT_WIDTH_PX = 200
