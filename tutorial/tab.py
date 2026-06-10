@@ -1,6 +1,8 @@
 from css_parser import *
 from html_parser import *
 import urllib.parse
+import dukpy
+from jscontext import JSContext
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
@@ -41,12 +43,35 @@ class Tab:
         self.history.append(url)
         self.url = url
         body = url.request(payload)
+        print("html: ", body)
+
         if url.scheme == "view-source":
             self.canvas.create_text(10, 10, text=body, anchor="nw")
         else:
             self.nodes = HTMLParser(body).parse()
             # print_tree(self.nodes)
             self.rules = DEFAULT_STYLE_SHEET.copy()
+            scripts =  [node.attributes["src"] for node
+                in tree_to_list(self.nodes, [])
+                if isinstance(node, Element)
+                and node.tag == "script"
+                and "src" in node.attributes
+            ]
+            self.js = JSContext(self)
+            print("Scripts: ", scripts)
+            for script in scripts:
+
+                script_url = url.resolve(script)
+                print("Loading script: ", script_url)
+                try:
+                    script_body = script_url.request()
+                    print("Script body: ", script_body)
+                except Exception as e:
+                    print("Failed to load script: ", script_url, "Error:", e)  # ← print the error
+                    continue
+                result = self.js.run(script_url, script_body)
+                print("Script returned: ", result)
+
             links = [
                 node.attributes["href"]
                 for node in tree_to_list(self.nodes, [])
@@ -59,7 +84,8 @@ class Tab:
                 style_url = url.resolve(link)
                 try:
                     style_body = style_url.request()
-                except:
+                except Exception as e:
+                    print("Failed to load script: ", style_url, "Error:", e)  # ← print the error
                     continue
                 self.rules.extend(CSSParser(style_body).parse())
             self.render()
@@ -84,6 +110,7 @@ class Tab:
             if isinstance(elt, Text):
                 pass
             elif elt.tag == "input":
+                if self.js.dispatch_event("click", elt): return
                 elt.attributes['value'] = ""
                 if self.focus:
                     self.focus.is_focused = False
@@ -91,16 +118,19 @@ class Tab:
                 self.focus.is_focused = True
                 return self.render()
             elif elt.tag == "button":
+                if self.js.dispatch_event("click", elt): return
                 while elt:
                     if elt.tag == 'form' and "action" in elt.attributes:
                         return self.submit_form(elt)
                     elt = elt.parent
             elif elt.tag == "a" and "href" in elt.attributes:
+                if self.js.dispatch_event("click", elt): return
                 url = self.url.resolve(elt.attributes["href"])
                 return self.load(url)
             elt = elt.parent
 
     def submit_form(self, elt):
+        if self.js.dispatch_event("submit", elt): return
         inputs = [node for node in tree_to_list(elt, []) 
                 if isinstance(node, Element) and node.tag == "input" and "name" in node.attributes]
 
@@ -131,6 +161,7 @@ class Tab:
 
     def keypress(self, char):
         if self.focus:
+            if self.js.dispatch_event("keydown", self.focus): return
             if self.focus.tag == "input":
                 self.focus.attributes["value"] = (
                     self.focus.attributes.get("value", "") + char
