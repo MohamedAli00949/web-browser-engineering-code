@@ -60,6 +60,7 @@ def parse_cache_control(response_headers):
 
     return cacheable, max_age
 
+COOKIE_JAR = {}
 
 class URL:
     socket_cache = {}
@@ -122,11 +123,11 @@ class URL:
             port_part = ""
         return self.scheme + "://" + self.host + port_part + self.path
 
-    def request(self, payload=None, redirects=0):
+    def request(self, referrer, payload=None, redirects=0):
         MAX_REDIRECTS = 10
 
         if self.scheme == "view-source":
-            return self.inner_url.request()
+            return self.inner_url.request(self.inner_url)
         elif self.scheme == "data":
             if self.mimetype in ["text/html", "text/plain"]:
                 return self.data
@@ -172,6 +173,16 @@ class URL:
             request += "User-Agent: MoBrowserFromWebBrowserEngineeringBook/1.0\r\n"
             request += "Accept-Encoding: identity\r\n"
 
+            if self.host in COOKIE_JAR:
+                cookie, params = COOKIE_JAR[self.host]
+                allow_cookie = True
+                if referrer and params.get("samesite", "none") == "lax":
+                    if method != "GET":
+                        allow_cookie = self.host == referrer.host
+                if allow_cookie:
+                    request += f"Cookie: {cookie}\r\n"
+                    print("Cookie: ", cookie, "for host: ", self.host, COOKIE_JAR)
+
             if payload:
                 payload_encoded = payload.encode("utf8")
                 request += "Content-Type: application/x-www-form-urlencoded\r\n"
@@ -182,12 +193,13 @@ class URL:
                 request += "\r\n"
                 try:
                     s.send(request.encode("utf8"))
-                    response = s.makefile("rb")
-                    statusLine = response.readline().decode("utf8")
                 except (ConnectionAbortedError, BrokenPipeError, OSError):
                     s.close()
                     URL.socket_cache.pop(socket_key, None)
-                    return self.request(redirects)
+                    return self.request(referrer, payload, redirects)
+
+            response = s.makefile("rb")
+            statusLine = response.readline().decode("utf8")
 
             version, status, explanation = statusLine.split(" ", 2)
 
@@ -211,6 +223,20 @@ class URL:
                     redirect_url = f"{self.scheme}://{self.host}{redirect_url}"
 
                 return URL(redirect_url).request(redirects=redirects + 1)
+            
+            if "set-cookie" in response_headers:
+                cookie = response_headers["set-cookie"]
+                params = {}
+                if ";" in cookie:
+                    cookie, rest = cookie.split(";", 1)
+                    for param in rest.split(";"):
+                        if "=" in param:
+                            param, value = param.split("=", 1)
+                        else:
+                            value = "true"
+                        params[param.strip().casefold()] = value.casefold()
+                COOKIE_JAR[self.host] = (cookie, params)
+                print("set cookie: ", cookie, "for host: ", self.host, COOKIE_JAR)
 
             if response_headers.get("transfer-encoding") == "chunked":
                 content = read_chunked(response)
@@ -239,7 +265,7 @@ class URL:
                     expires = (time.time() + max_age) if max_age is not None else None
                     URL.response_cache[key] = {"content": content, "expires": expires}
 
-            return content
+            return response_headers, content
 
     def resolve(self, url):
         if "://" in url:
@@ -256,3 +282,6 @@ class URL:
             return URL(f"{self.scheme}:{url}")
         else:
             return URL(f"{self.scheme}://{self.host}:{self.port}{url}")
+
+    def origin(self):
+        return f"{self.scheme}://{self.host}:{self.port}"

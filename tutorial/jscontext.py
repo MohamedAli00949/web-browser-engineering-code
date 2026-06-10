@@ -13,6 +13,7 @@ class JSContext:
     self.interp.export_function("querySelectorAll", self.querySelectorAll)
     self.interp.export_function("getAttribute", self.getAttribute)
     self.interp.export_function("innerHTML", self.innerHTML_set)
+    self.interp.export_function("XMLHttpRequest_send", self.XMLHttpRequest_send)
     self.interp.evaljs(RUNTIME_JS)
 
     self.node_to_handle = {}
@@ -66,3 +67,14 @@ class JSContext:
       child.parent = elt
 
     self.tab.render()
+  def XMLHttpRequest_send(self, method, url, body):
+    full_url = self.tab.url.resolve(url)
+
+    if not self.tab.allowed_request(full_url):
+      raise Exception("Cross-origin XML request blocked by CSP")
+
+    if full_url.origin() != self.tab.url.origin():
+      raise Exception("Cross-origin XML request not allowed") 
+
+    headers, out = full_url.request(self.tab.url, body)
+    return out

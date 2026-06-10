@@ -1,6 +1,7 @@
 from css_parser import *
 from html_parser import *
 import urllib.parse
+from url import URL
 import dukpy
 from jscontext import JSContext
 
@@ -40,10 +41,18 @@ class Tab:
             cmd.execute(self.scroll - offset, canvas)
 
     def load(self, url, payload=None):
+        headers, body = url.request(self.url, payload)
         self.history.append(url)
         self.url = url
-        body = url.request(payload)
         print("html: ", body)
+
+        self.allowed_origins = None
+        if "content-security-policy" in headers:
+            csp = headers["content-security-policy"].split()
+            if len(csp) > 0 and csp[0] == "default-src":
+                self.allowed_origins = []
+                for origin in csp[1:]:
+                    self.allowed_origins.append(URL(origin).origin())
 
         if url.scheme == "view-source":
             self.canvas.create_text(10, 10, text=body, anchor="nw")
@@ -63,8 +72,12 @@ class Tab:
 
                 script_url = url.resolve(script)
                 print("Loading script: ", script_url)
+                if not self.allowed_request(script_url):
+                    print("Blocked request: ", script, "due to cross-origin policy")
+                    continue
+
                 try:
-                    script_body = script_url.request()
+                    header, script_body = script_url.request(script_url)
                     print("Script body: ", script_body)
                 except Exception as e:
                     print("Failed to load script: ", script_url, "Error:", e)  # ← print the error
@@ -83,7 +96,7 @@ class Tab:
             for link in links:
                 style_url = url.resolve(link)
                 try:
-                    style_body = style_url.request()
+                    header, style_body = style_url.request(style_url)
                 except Exception as e:
                     print("Failed to load script: ", style_url, "Error:", e)  # ← print the error
                     continue
@@ -168,4 +181,6 @@ class Tab:
                 )
                 self.render()
 
+    def allowed_request(self, url):
+        return self.allowed_origins == None or url.origin() in self.allowed_origins
 
