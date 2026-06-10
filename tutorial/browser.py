@@ -3,8 +3,13 @@ import ssl
 import os
 import gzip
 import time
+import tkinter
 
 DEFAULT_FILE = "test/index.html"
+WIDTH, HEIGHT = 800, 600
+HSTEP, VSTEP = 13, 18
+SCROLL_STEP = 100
+
 
 def read_chunked(response):
     body = b""
@@ -27,39 +32,92 @@ def read_chunked(response):
 
     return body
 
+
 def cache_key(scheme, host, path):
     """Unique string key for this URL."""
     return f"{scheme}://{host}{path}"
 
+
 def parse_cache_control(response_headers):
-        """
-        Returns (cacheable, max_age).
-        cacheable = False if no-store or any unrecognized directive is present.
-        max_age   = seconds to cache, or None if not specified.
-        """
-        if "cache-control" not in response_headers:
-            return True, None  # no header → assume cacheable, no expiry
+    """
+    Returns (cacheable, max_age).
+    cacheable = False if no-store or any unrecognized directive is present.
+    max_age   = seconds to cache, or None if not specified.
+    """
+    if "cache-control" not in response_headers:
+        return True, None  # no header → assume cacheable, no expiry
 
-        directives = [d.strip() for d in response_headers["cache-control"].split(",")]
-        max_age = None
-        cacheable = True
+    directives = [d.strip() for d in response_headers["cache-control"].split(",")]
+    max_age = None
+    cacheable = True
 
-        for directive in directives:
-            if directive == "no-store":
-                return False, None  # must not cache
-            elif directive.startswith("max-age="):
-                try:
-                    max_age = int(directive.split("=", 1)[1])
-                except ValueError:
-                    cacheable = False
-            elif directive == "no-cache":
-                # no-cache means "revalidate", treat as not cacheable for simplicity
+    for directive in directives:
+        if directive == "no-store":
+            return False, None  # must not cache
+        elif directive.startswith("max-age="):
+            try:
+                max_age = int(directive.split("=", 1)[1])
+            except ValueError:
                 cacheable = False
-            # any other directive → don't cache
-            elif directive not in ("public", "private", "must-revalidate"):
-                cacheable = False
+        elif directive == "no-cache":
+            # no-cache means "revalidate", treat as not cacheable for simplicity
+            cacheable = False
+        # any other directive → don't cache
+        elif directive not in ("public", "private", "must-revalidate"):
+            cacheable = False
 
-        return cacheable, max_age
+    return cacheable, max_age
+
+
+def layout(text):
+    display_list = []
+    cursor_x, cursor_y = HSTEP, VSTEP
+    for c in text:
+        display_list.append((cursor_x, cursor_y, c))
+        # if c == "\n":
+        if cursor_x >= WIDTH - HSTEP:
+            cursor_y += VSTEP
+            cursor_x = HSTEP
+        else:
+            cursor_x += HSTEP
+
+    return display_list
+
+
+def lex(body):
+    text = ""
+    in_tag = False
+    in_entity = False
+    entity = ""
+
+    for c in body:
+        if in_entity:
+            if c == ";":
+                if entity == "lt":
+                    # print("<", end="")
+                    text += "<"
+                elif entity == "gt":
+                    # print(">", end="")
+                    text += ">"
+                else:
+                    # print("&" + entity + ";", end="")
+                    text += "&" + entity + ";"
+                in_entity = False
+                entity = ""
+            else:
+                entity += c
+        elif c == "&" and not in_tag:
+            in_entity = True
+            entity = ""
+        elif c == "<":
+            in_tag = True
+        elif c == ">":
+            in_tag = False
+        elif not in_tag:
+            # print(c, end="")
+            text += c
+
+    return text
 
 class URL:
     socket_cache = {}
@@ -187,7 +245,6 @@ class URL:
                 header, value = line.split(":", 1)
                 response_headers[header.casefold()] = value.strip()
 
-            
             if status.startswith("3") and "location" in response_headers:
                 if redirects >= MAX_REDIRECTS:
                     raise Exception("Too many redirects")
@@ -199,7 +256,7 @@ class URL:
                 if redirect_url.startswith("/"):
                     redirect_url = f"{self.scheme}://{self.host}{redirect_url}"
 
-                return URL(redirect_url).request(redirects=redirects+1)
+                return URL(redirect_url).request(redirects=redirects + 1)
 
             if response_headers.get("transfer-encoding") == "chunked":
                 content = read_chunked(response)
@@ -231,47 +288,50 @@ class URL:
             return content
 
 
-def show(body):
-    in_tag = False
-    in_entity = False
-    entity = ""
+class Browser:
+    def __init__(self):
+        self.window = tkinter.Tk()
+        self.canvas = tkinter.Canvas(self.window, width=WIDTH, height=HEIGHT)
+        self.canvas.pack()
+        self.display_list = []
+        self.scroll = 0
+        self.window.bind("<Up>", self.scrollup)
+        self.window.bind("<Down>", self.scrolldown)
 
-    for c in body:
-        if in_entity:
-            if c == ";":
-                if entity == "lt":
-                    print("<", end="")
-                elif entity == "gt":
-                    print(">", end="")
-                else:
-                    print("&" + entity + ";", end="")
-                in_entity = False
-                entity = ""
-            else:
-                entity += c
-        elif c == "&" and not in_tag:
-            in_entity = True
-            entity = ""
-        elif c == "<":
-            in_tag = True
-        elif c == ">":
-            in_tag = False
-        elif not in_tag:
-            print(c, end="")
+    def scrollup(self, e):
+        self.scroll -= SCROLL_STEP
+        self.draw()
 
+    def scrolldown(self, e):
+        self.scroll += SCROLL_STEP
+        self.draw()
 
-def load(url):
-    body = url.request()
-    if url.scheme == "view-source":
-        print(body)
-    else:
-        show(body)
+    def draw(self):
+        self.canvas.delete("all")
+        for x, y, c in self.display_list:
+            if y > (self.scroll - VSTEP) + HEIGHT:
+                continue
+            if y + (VSTEP * 2) < self.scroll:
+                continue
+            self.canvas.create_text(x, y - (self.scroll), text=c, anchor="nw")
+
+    def load(self, url):
+        body = url.request()
+        if url.scheme == "view-source":
+            self.canvas.create_text(10, 10, text=body, anchor="nw")
+        else:
+            text = lex(body)
+            self.display_list = layout(text)
+            self.draw()
+
 
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1:
         url = URL(sys.argv[1])
-        load(url)
+        Browser().load(url)
     else:
-        load(URL("file://" + DEFAULT_FILE))
+        Browser().load(URL("file://" + DEFAULT_FILE))
+
+    tkinter.mainloop()
