@@ -130,18 +130,18 @@ class URL:
             return self.inner_url.request(self.inner_url)
         elif self.scheme == "data":
             if self.mimetype in ["text/html", "text/plain"]:
-                return self.data
+                return {}, self.data
             else:
-                return f"<p>Unsupported data type: {self.mimetype}</p>"
+                return {}, f"<p>Unsupported data type: {self.mimetype}</p>"
         elif self.scheme == "file":
             with open(self.path, "r", encoding="utf8") as f:
-                return f.read()
+                return {}, f.read()
         else:
             key = cache_key(self.scheme, self.host, self.path)
             if key in URL.response_cache and not payload:
                 entry = URL.response_cache[key]
                 if entry["expires"] is None or time.time() < entry["expires"]:
-                    return entry["content"]
+                    return entry["headers"], entry["content"]
                 else:
                     del URL.response_cache[key]
 
@@ -263,7 +263,7 @@ class URL:
                 cacheable, max_age = parse_cache_control(response_headers)
                 if cacheable:
                     expires = (time.time() + max_age) if max_age is not None else None
-                    URL.response_cache[key] = {"content": content, "expires": expires}
+                    URL.response_cache[key] = {"content": content, "headers": response_headers, "expires": expires}
 
             return response_headers, content
 
