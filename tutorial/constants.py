@@ -52,3 +52,9 @@ INHERITED_PROPERTIES = {
 }
 
 INPUT_WIDTH_PX = 200
+
+NAMED_COLORS = {
+    "black": "#000000",
+    "white": "#ffffff",
+    "red": "#ff0000",
+}

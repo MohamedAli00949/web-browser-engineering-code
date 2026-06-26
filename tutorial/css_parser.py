@@ -1,8 +1,8 @@
-import tkinter
-from tkinter import font
+import skia
 from html_parser import Element
 from constants import *
 from html_parser import Text
+from utils import *
 
 
 class CSSParser:
@@ -120,19 +120,6 @@ class DescendantSelector:
         return False
 
 
-FONTS = {}
-
-
-def get_font(size, weight, style):
-    key = (size, weight, style)
-    if key not in FONTS:
-        f = font.Font(size=size, weight=weight, slant=style)
-        label = tkinter.Label(font=f)
-        FONTS[key] = (f, label)
-
-    return FONTS[key][0]
-
-
 def style(node, rules):
     node.style = {}
 
@@ -171,18 +158,6 @@ def cascade_priority(rule):
     selector, body = rule
     return selector.priority
 
-
-class Rect:
-    def __init__(self, left, top, right, bottom):
-        self.left = left
-        self.top = top
-        self.right = right
-        self.bottom = bottom
-
-    def containsPoint(self, x, y):
-        return x >= self.left and x < self.right and y >= self.top and y < self.bottom
-
-
 class DocumentLayout:
     def __init__(self, node):
         self.node = node
@@ -213,40 +188,54 @@ class DrawText:
         self.left = x1
         self.text = text
         self.font = font
+        self.right = x1 + font.measureText(text)
         self.color = color
-        self.bottom = y1 + font.metrics("linespace")
+        self.bottom = y1 + linespace(font)
 
-        self.rect = Rect(x1, y1, x1, self.bottom)
+        self.rect = skia.Rect.MakeLTRB(x1, y1, self.right, self.bottom)
 
     def execute(self, scroll, canvas):
-        canvas.create_text(
-            self.left,
-            self.top - scroll,
-            text=self.text,
-            font=self.font,
-            anchor="nw",
-            fill=self.color,
+        paint = skia.Paint(
+            AntiAlias=True,
+            Color=parse_color(self.color),
         )
+        baseline = self.top - scroll + self.font.getMetrics().fAscent
+        canvas.drawString(self.text, float(self.left), baseline, self.font, paint)
+
+        # canvas.create_text(
+        #     self.left,
+        #     self.top - scroll,
+        #     text=self.text,
+        #     font=self.font,
+        #     anchor="nw",
+        #     fill=self.color,
+        # )
 
 
-class DrawRect:
-    def __init__(self, rect, color):
+class DrawRRect:
+    def __init__(self, rect, radius, color):
         self.rect = rect
-        self.top = rect.top
-        self.left = rect.left
-        self.bottom = rect.bottom
-        self.right = rect.right
+        self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
+        # self.top = rect.top
+        # self.left = rect.left
+        # self.bottom = rect.bottom
+        # self.right = rect.right
         self.color = color
 
     def execute(self, scroll, canvas):
-        canvas.create_rectangle(
-            self.rect.left,
-            self.rect.top - scroll,
-            self.rect.right,
-            self.rect.bottom - scroll,
-            width=0,
-            fill=self.color,
-        )
+        # sk_color = parse_color(self.color)
+        # canvas.drawRect(self.rrect, paint=skia.Paint(Color=sk_color))
+        sk_color = parse_color(self.color)
+        canvas.drawRRect(self.rrect, skia.Paint(Color=sk_color))
+
+        # canvas.create_rectangle(
+        #     self.rect.left,
+        #     self.rect.top - scroll,
+        #     self.rect.right,
+        #     self.rect.bottom - scroll,
+        #     width=0,
+        #     fill=self.color,
+        # )
 
 
 class DrawOutline:
@@ -256,31 +245,53 @@ class DrawOutline:
         self.thickness = thickness
 
     def execute(self, scroll, canvas):
-        canvas.create_rectangle(
-            self.rect.left,
-            self.rect.top - scroll,
-            self.rect.right,
-            self.rect.bottom - scroll,
-            width=self.thickness,
-            outline=self.color,
+        # canvas.create_rectangle(
+        #     self.rect.left,
+        #     self.rect.top - scroll,
+        #     self.rect.right,
+        #     self.rect.bottom - scroll,
+        #     width=self.thickness,
+        #     outline=self.color,
+        # )
+
+        paint = skia.Paint(
+            Color=parse_color(self.color),
+            StrokeWidth=self.thickness,
+            Style=skia.Paint.kStroke_Style,
         )
+
+        canvas.drawRect(self.rect.makeOffset(0, -scroll), paint)
 
 
 class DrawLine:
     def __init__(self, x1, y1, x2, y2, color, thickness):
-        self.rect = Rect(x1, y1, x2, y2)
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = x2
+        self.y2 = y2
+        self.rect = skia.Rect.MakeLTRB(x1, y1, x2, y2)
         self.color = color
         self.thickness = thickness
 
     def execute(self, scroll, canvas):
-        canvas.create_line(
-            self.rect.left,
-            self.rect.top - scroll,
-            self.rect.right,
-            self.rect.bottom - scroll,
-            fill=self.color,
-            width=self.thickness,
+        path = skia.Path().moveTo(self.x1 - scroll, self.y1).lineTo(self.x2, self.y2)
+
+        paint = skia.Paint(
+            Color=parse_color(self.color),
+            StrokeWidth=self.thickness,
+            Style=skia.Paint.kStroke_Style,
         )
+
+        canvas.drawPath(path, paint)
+
+        # canvas.create_line(
+        #     self.rect.left,
+        #     self.rect.top - scroll,
+        #     self.rect.right,
+        #     self.rect.bottom - scroll,
+        #     fill=self.color,
+        #     width=self.thickness,
+        # )
 
 
 class TextLayout:
@@ -306,15 +317,15 @@ class TextLayout:
             style = "roman"
         size = int(float(self.node.style["font-size"][:-2]) * 0.75)
         self.font = get_font(size, weight, style)
-        self.width = self.font.measure(self.word)
+        self.width = self.font.measureText(self.word)
 
         if self.previous:
-            space = self.previous.font.measure(" ")
+            space = self.previous.font.measureText(" ")
             self.x = self.previous.x + space + self.previous.width
         else:
             self.x = self.parent.x
 
-        self.height = self.font.metrics("linespace")
+        self.height = linespace(self.font)
 
     def paint(self):
         color = self.node.style["color"]
@@ -349,25 +360,28 @@ class InputLayout:
         self.font = get_font(size, weight, style)
 
         if self.previous:
-            space = self.previous.font.measure(" ")
+            space = self.previous.font.measureText(" ")
             self.x = self.previous.x + space + self.previous.width
         else:
             self.x = self.parent.x
 
-        self.height = self.font.metrics("linespace")
+        self.height = linespace(self.font)
 
     def paint(self):
         cmds = []
         bgcolor = self.node.style.get("background-color", "transparent")
 
         if bgcolor != "transparent":
-            rect = DrawRect(self.self_rect(), bgcolor)
+            radius = float(
+                self.node.style.get("border-radius", "0px")[:-2]
+            )
+            rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
         if self.node.tag == "input":
             text = self.node.attributes.get("value", "")
             if self.node.is_focused:
-                cx = self.x + self.font.measure(text)
+                cx = self.x + self.font.measureText(text)
                 cmds.append(DrawLine(cx, self.y, cx, self.y + self.height, "black", 1))
         elif self.node.tag == "button":
             if len(self.node.children) == 1 and isinstance(self.node.children[0], Text):
@@ -382,7 +396,7 @@ class InputLayout:
         return cmds
 
     def self_rect(self):
-        return Rect(self.x, self.y, self.x + self.width, self.y + self.height)
+        return skia.Rect.MakeXYWH(self.x, self.y, self.x + self.width, self.y + self.height)
     
     def should_paint(self):
         return True
@@ -417,11 +431,11 @@ class LineLayout:
             self.height = 0
             return
 
-        max_ascent = max(word.font.metrics("ascent") for word in self.children)
+        max_ascent = max(word.font.getMetrics().fAscent for word in self.children)
         baseline = self.y + 1.25 * max_ascent
         for word in self.children:
-            word.y = baseline - word.font.metrics("ascent")
-        max_descent = max(word.font.metrics("descent") for word in self.children)
+            word.y = baseline - word.font.getMetrics().fAscent
+        max_descent = max(word.font.getMetrics().fDescent for word in self.children)
         self.height = 1.25 * (max_ascent + max_descent)
 
     def paint(self):
@@ -449,15 +463,16 @@ class BlockLayout:
         self.style = "roman"
         self.cursor_x, self.cursor_y = HSTEP, VSTEP
         self.size = 12
-        self.word_font = font.Font(
-            family="Times", size=self.size, weight=self.weight, slant=self.style
-        )
+        # self.word_font = skia.Font(
+        #     family="Times", size=self.size, weight=self.weight, slant=self.style
+        # )
+        self.word_font = get_font(self.size, self.weight, self.style)
 
         for child in self.children:
             child.layout()
 
     def self_rect(self):
-        return Rect(self.x, self.y, self.x + self.width, self.y + self.height)
+        return skia.Rect.MakeXYWH(self.x, self.y, self.x + self.width, self.y + self.height)
 
     def paint(self):
         cmds = []
@@ -466,8 +481,11 @@ class BlockLayout:
 
         if bgcolor != "transparent":
             # x2, y2 = self.x + self.width, self.y + self.height
-            # rect = DrawRect(self.x, self.y, x2, y2, bgcolor)
-            rect = DrawRect(self.self_rect(), bgcolor)
+            # rect = DrawRRect(self.x, self.y, x2, y2, bgcolor)
+            radius = float(
+                self.node.style.get("border-radius", "0px")[:-2]
+            )
+            rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
         if self.layout_mode() == "inline":
@@ -492,7 +510,7 @@ class BlockLayout:
         size = int(float(node.style["font-size"][:-2]) * 0.75)
         font = get_font(size, weight, style)
 
-        self.cursor_x += w + font.measure(" ")
+        self.cursor_x += w + font.measureText(" ")
 
     def layout(self):
         self.x = self.parent.x
@@ -541,29 +559,14 @@ class BlockLayout:
         elif tag == "br":
             self.flush()
             self.cursor_x = HSTEP
-            self.cursor_y += self.word_font.metrics("linespace") * 1.25
+            self.cursor_y += linespace(self.word_font) * 1.25
         elif tag == "p" or tag == "div":
             self.flush()
             self.cursor_y += VSTEP
         elif tag == "pre":
             self.style = "roman"
             self.cursor_x = HSTEP
-            self.cursor_y += self.word_font.metrics("linespace") * 1.25
-        # elif tag == "h1":
-        #     self.flush()
-        #     self.size += 20
-        #     self.cursor_x = HSTEP
-        #     self.cursor_y += self.word_font.metrics("linespace") * 3.5
-        # elif tag == "h2":
-        #     self.flush()
-        #     self.size += 10
-        #     self.cursor_x = HSTEP
-        #     self.cursor_y += self.word_font.metrics("linespace") * 2.5
-        # elif tag == "h3":
-        #     self.flush()
-        #     self.size += 5
-        #     self.cursor_x = HSTEP
-        #     self.cursor_y += self.word_font.metrics("linespace") * 1.75
+            self.cursor_y += linespace(self.word_font) * 1.25
         elif tag == "small":
             self.size -= 2
         elif tag == "big":
@@ -600,15 +603,15 @@ class BlockLayout:
     def flush(self):
         if not self.line:
             return
-        max_ascent = max([f.metrics("ascent") for x, word, f, color in self.line])
+        max_ascent = max([f.getMetrics().fAscent for x, word, f, color in self.line])
         baseline = self.cursor_y * 1.25 + max_ascent
 
         for rel_x, word, f, color in self.line:
             x = self.x + rel_x
-            y = self.y + baseline - f.metrics("ascent")
+            y = self.y + baseline - f.getMetrics().fAscent
             self.display_list.append((x, y, word, f, color))
 
-        max_descent = max(f.metrics("descent") for _, _, f, _ in self.line)
+        max_descent = max(f.getMetrics().fAscent for _, _, f, _ in self.line)
         self.cursor_y = baseline + max_descent * 1.25
         self.cursor_x = HSTEP
         self.line = []

@@ -18,12 +18,12 @@ class Tab:
         self.tab_height = tab_height
 
         # print("fonts: ", font.families())
-        self.bi_times = font.Font(
-            family="Times",
-            size=16,
-            weight="bold",
-            slant="italic",
-        )
+        # self.bi_times = font.Font(
+        #     family="Times",
+        #     size=16,
+        #     weight="bold",
+        #     slant="italic",
+        # )
 
     def scrollup(self):
         self.scroll = max(0, self.scroll - SCROLL_STEP)
@@ -34,9 +34,9 @@ class Tab:
 
     def draw(self, canvas, offset):
         for cmd in self.display_list:
-            if cmd.rect.top > self.scroll + self.tab_height:
+            if cmd.rect.top() > self.scroll + self.tab_height:
                 continue
-            if cmd.rect.bottom < self.scroll:
+            if cmd.rect.bottom() < self.scroll:
                 continue
             cmd.execute(self.scroll - offset, canvas)
 
