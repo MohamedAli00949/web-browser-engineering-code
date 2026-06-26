@@ -199,7 +199,8 @@ class DrawText:
             AntiAlias=True,
             Color=parse_color(self.color),
         )
-        baseline = self.top - scroll + self.font.getMetrics().fAscent
+        # FIX: fAscent is negative in Skia, subtract it to move baseline down correctly
+        baseline = self.top - scroll - self.font.getMetrics().fAscent
         canvas.drawString(self.text, float(self.left), baseline, self.font, paint)
 
         # canvas.create_text(
@@ -214,28 +215,16 @@ class DrawText:
 
 class DrawRRect:
     def __init__(self, rect, radius, color):
-        self.rect = rect
+        self.rect = rect  # FIX: store rect so tab.draw can call cmd.rect.top()
         self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
-        # self.top = rect.top
-        # self.left = rect.left
-        # self.bottom = rect.bottom
-        # self.right = rect.right
         self.color = color
 
     def execute(self, scroll, canvas):
-        # sk_color = parse_color(self.color)
-        # canvas.drawRect(self.rrect, paint=skia.Paint(Color=sk_color))
         sk_color = parse_color(self.color)
-        canvas.drawRRect(self.rrect, skia.Paint(Color=sk_color))
-
-        # canvas.create_rectangle(
-        #     self.rect.left,
-        #     self.rect.top - scroll,
-        #     self.rect.right,
-        #     self.rect.bottom - scroll,
-        #     width=0,
-        #     fill=self.color,
-        # )
+        # FIX: apply scroll offset vertically
+        moved = self.rect.makeOffset(0, -scroll)
+        rrect = skia.RRect.MakeRectXY(moved, self.rrect.getSimpleRadii().fX, self.rrect.getSimpleRadii().fY)
+        canvas.drawRRect(rrect, skia.Paint(Color=sk_color))
 
 
 class DrawOutline:
@@ -274,7 +263,7 @@ class DrawLine:
         self.thickness = thickness
 
     def execute(self, scroll, canvas):
-        path = skia.Path().moveTo(self.x1 - scroll, self.y1).lineTo(self.x2, self.y2)
+        path = skia.Path().moveTo(self.x1, self.y1 - scroll).lineTo(self.x2, self.y2 - scroll)
 
         paint = skia.Paint(
             Color=parse_color(self.color),
@@ -396,7 +385,7 @@ class InputLayout:
         return cmds
 
     def self_rect(self):
-        return skia.Rect.MakeXYWH(self.x, self.y, self.x + self.width, self.y + self.height)
+        return skia.Rect.MakeLTRB(self.x, self.y, self.x + self.width, self.y + self.height)
     
     def should_paint(self):
         return True
@@ -426,15 +415,14 @@ class LineLayout:
         for word in self.children:
             word.layout()
 
-        # handle the line height
         if not self.children:
             self.height = 0
             return
 
-        max_ascent = max(word.font.getMetrics().fAscent for word in self.children)
+        max_ascent = max(-word.font.getMetrics().fAscent for word in self.children)
         baseline = self.y + 1.25 * max_ascent
         for word in self.children:
-            word.y = baseline - word.font.getMetrics().fAscent
+            word.y = baseline + word.font.getMetrics().fAscent
         max_descent = max(word.font.getMetrics().fDescent for word in self.children)
         self.height = 1.25 * (max_ascent + max_descent)
 

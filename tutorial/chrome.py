@@ -33,7 +33,7 @@ class Chrome:
             self.urlbar_bottom - self.padding,
         )
         self.address_rect = skia.Rect.MakeLTRB(
-            self.back_rect.top() + self.padding,
+            self.back_rect.right() + self.padding,
             self.urlbar_top + self.padding,
             WIDTH - self.padding,
             self.urlbar_bottom - self.padding,
@@ -160,6 +160,8 @@ class Chrome:
 
     def click(self, x, y):
         if self.newtab_rect.contains(x, y):
+            # self.browser.new_tab(URL("https://browser.engineering/examples/example11-rounded-background.html"))
+            
             # self.browser.new_tab(URL("https://example.org"))
             self.browser.new_tab(URL("http://localhost:8000"))
         elif self.back_rect.contains(x, y):
