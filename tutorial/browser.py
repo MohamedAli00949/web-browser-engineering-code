@@ -1,28 +1,54 @@
-import tkinter
-from tkinter import font
+import ctypes
+import sdl2
+import skia
 from url import URL
 from html_parser import *
 from css_parser import *
 from tab import Tab
 from chrome import Chrome
 
+def mainloop(browser):
+    event = sdl2.SDL_Event()
+    while True:
+        while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
+            if event.type == sdl2.SDL_QUIT:
+                browser.handle_quit()
+                sdl2.SDL_Quit()
+                sys.exit()
+            elif event.type == sdl2.SDL_MOUSEBUTTONUP:
+                browser.handle_click(event.button)
+            elif event.type == sdl2.SDL_KEYDOWN:
+                if event.key.keysym.sym == sdl2.SDLK_RETURN:
+                    browser.handle_enter()
+                elif event.key.keysym.sym == sdl2.SDLK_DOWN:
+                    browser.handle_down()
+            elif event.type == sdl2.SDL_TEXTINPUT:
+                browser.handle_key(event.text.text.decode('utf8'))
+
 
 class Browser:
     def __init__(self):
         self.tabs = []
         self.active_tab = None
-        self.window = tkinter.Tk()
-        self.canvas = tkinter.Canvas(
-            self.window, width=WIDTH, height=HEIGHT, bg="white"
+        self.sdl_window = sdl2.SDL_CreateWindow(b"Browser",
+            sdl2.SDL_WINDOWPOS_CENTERED, sdl2.SDL_WINDOWPOS_CENTERED,
+            WIDTH, HEIGHT, sdl2.SDL_WINDOW_SHOWN
         )
-        self.canvas.pack()
-        self.window.bind("<Up>", self.handle_up)
-        self.window.bind("<Down>", self.handle_down)
-        self.window.bind("<Button-1>", self.handle_click)
-        self.window.bind("<Key>", self.handle_key)
-        self.window.bind("<Return>", self.handle_enter)
+        # self.window = tkinter.Tk()
+        # self.canvas = tkinter.Canvas(
+        #     self.window, width=WIDTH, height=HEIGHT, bg="white"
+        # )
+        # self.canvas.pack()
+        # self.window.bind("<Up>", self.handle_up)
+        # self.window.bind("<Down>", self.handle_down)
+        # self.window.bind("<Button-1>", self.handle_click)
+        # self.window.bind("<Key>", self.handle_key)
+        # self.window.bind("<Return>", self.handle_enter)
 
         self.chrome = Chrome(self)
+
+    def handle_quit(self):
+        sdl2.SDL_DestroyWindow(self.sdl_window)
 
     def handle_up(self, e):
         self.active_tab.scrollup()
@@ -76,10 +102,13 @@ class Browser:
 if __name__ == "__main__":
     import sys
 
+    sdl2.SDL_Init(sdl2.SDL_INIT_EVENTS)
+    browser = Browser()
     if len(sys.argv) > 1:
         url = URL(sys.argv[1])
-        Browser().new_tab(url)
+        browser.new_tab(url)
     else:
-        Browser().new_tab(URL("file://" + DEFAULT_FILE))
+        browser.new_tab(URL("file://" + DEFAULT_FILE))
 
-    tkinter.mainloop()
+    mainloop(browser)
+    # tkinter.mainloop()
