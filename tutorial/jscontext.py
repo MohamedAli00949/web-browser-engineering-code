@@ -85,10 +85,6 @@ class JSContext:
     headers, out = full_url.request(self.tab.url, body)
     return out
 
-  def dispatch_setimout(self, handle):
-    if self.discarded: return
-    self.interp.evaljs(SETTIMEOUT_JS, handle=handle)
-
   def setTimeout(self, handle, time):
     def run_callback():
       task = Task(self.dispatch_setimout, handle)
@@ -96,3 +92,6 @@ class JSContext:
 
     threading.Timer(time / 1000.0, run_callback).start()
 
+  def dispatch_setimout(self, handle):
+    if self.discarded: return
+    self.interp.evaljs(SETTIMEOUT_JS, handle=handle)

@@ -37,8 +37,6 @@ def mainloop(browser):
             elif event.type == sdl2.SDL_TEXTINPUT:
                 browser.handle_key(event.text.text.decode('utf8'))
 
-    browser.active_tab.task_runner.run()
-
 
 class Browser:
     def __init__(self):
