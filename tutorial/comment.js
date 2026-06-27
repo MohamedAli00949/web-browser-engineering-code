@@ -1,3 +1,9 @@
+function callback() { 
+  // document.body.append("Comment too long!");
+  console.log("Comment too long!");
+}
+setTimeout(callback, 1000);
+
 var strong = document.querySelectorAll("strong")[0];
 
 var allow_submit = true;

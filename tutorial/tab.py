@@ -4,6 +4,7 @@ import urllib.parse
 from url import URL
 from tasks import *
 import dukpy
+import threading
 from jscontext import JSContext
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
@@ -19,6 +20,11 @@ class Tab:
         self.tab_height = tab_height
 
         self.task_runner = TaskRunner(self)
+        self.task_runner_thread = threading.Thread(
+            target=self.task_runner.run,
+            daemon=True,
+        )
+        self.task_runner_thread.start()
 
         # print("fonts: ", font.families())
         # self.bi_times = font.Font(
@@ -47,7 +53,7 @@ class Tab:
         headers, body = url.request(self.url, payload)
         self.history.append(url)
         self.url = url
-        print("html: ", body)
+        # print("html: ", body)
 
         self.allowed_origins = None
         if "content-security-policy" in headers:
@@ -73,19 +79,21 @@ class Tab:
             print("Scripts: ", scripts)
             for script in scripts:
                 script_url = url.resolve(script)
-                print("Loading script: ", script_url)
+                # print("Loading script: ", script_url)
                 if not self.allowed_request(script_url):
                     print("Blocked request: ", script, "due to cross-origin policy")
                     continue
 
                 try:
                     header, script_body = script_url.request(script_url)
-                    print("Script body: ", script_body)
+                    # print("Script body: ", script_body)
                 except Exception as e:
                     print("Failed to load script: ", script_url, "Error:", e)  # ← print the error
                     continue
-                task = Task(self.js.run, script_url, body)
+                task = Task(self.js.run, script_url, script_body)
                 self.task_runner.schedule_task(task)
+                # if self.js: self.js.discarded = True
+                # self.js = JSContext(self)
                 # result = self.js.run(script_url, script_body)
                 # print("Script returned: ", result)
 
