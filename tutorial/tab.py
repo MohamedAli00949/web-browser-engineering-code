@@ -2,6 +2,7 @@ from css_parser import *
 from html_parser import *
 import urllib.parse
 from url import URL
+from tasks import *
 import dukpy
 from jscontext import JSContext
 
@@ -16,6 +17,8 @@ class Tab:
         self.focus = None
         self.rules = []
         self.tab_height = tab_height
+
+        self.task_runner = TaskRunner(self)
 
         # print("fonts: ", font.families())
         # self.bi_times = font.Font(
@@ -69,7 +72,6 @@ class Tab:
             self.js = JSContext(self)
             print("Scripts: ", scripts)
             for script in scripts:
-
                 script_url = url.resolve(script)
                 print("Loading script: ", script_url)
                 if not self.allowed_request(script_url):
@@ -82,8 +84,10 @@ class Tab:
                 except Exception as e:
                     print("Failed to load script: ", script_url, "Error:", e)  # ← print the error
                     continue
-                result = self.js.run(script_url, script_body)
-                print("Script returned: ", result)
+                task = Task(self.js.run, script_url, body)
+                self.task_runner.schedule_task(task)
+                # result = self.js.run(script_url, script_body)
+                # print("Script returned: ", result)
 
             links = [
                 node.attributes["href"]
