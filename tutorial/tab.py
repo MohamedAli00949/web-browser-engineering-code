@@ -32,7 +32,7 @@ class Tab:
         max_y = max(self.document.height + 2 * VSTEP - self.tab_height, 0)
         self.scroll = min(self.scroll + SCROLL_STEP, max_y)
 
-    def draw(self, canvas, offset):
+    def raster(self, canvas, offset):
         for cmd in self.display_list:
             if cmd.rect.top() > self.scroll + self.tab_height:
                 continue

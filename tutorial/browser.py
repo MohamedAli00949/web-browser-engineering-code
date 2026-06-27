@@ -2,6 +2,7 @@ import ctypes
 import sys
 import sdl2
 import skia
+import math
 
 if sys.platform == "win32":
     try:
@@ -77,6 +78,9 @@ class Browser:
 
         self.chrome = Chrome(self)
 
+        self.chrome_surface = skia.Surface(WIDTH, math.ceil(self.chrome.bottom))
+        self.tab_surface = None
+
     def handle_quit(self):
         sdl2.SDL_DestroyWindow(self.sdl_window)
 
@@ -92,11 +96,16 @@ class Browser:
         if e.y < self.chrome.bottom:
             self.focus = None
             self.chrome.click(e.x, e.y)
+            self.raster_chrome()
         else:
             self.focus = "content"
             self.chrome.blur()
+            url = self.active_tab.url
             tab_y = e.y - self.chrome.bottom
             self.active_tab.click(e.x, tab_y)
+            if self.active_tab.url != url:
+                self.raster_chrome()
+            self.raster_tab()
         self.draw()
 
     def handle_key(self, char):
@@ -114,11 +123,25 @@ class Browser:
         self.chrome.enter()
         self.draw()
 
+    def raster_tab(self):
+        tab_height = math.ceil(
+            self.active_tab.document.height + 2*VSTEP
+        )
+
+        if not self.tab_surface or tab_height != self.tab_surface.height():
+            self.tab_surface = skia.Surface(WIDTH, tab_height)
+
+        canvas = self.tab_surface.getCanvas()
+        canvas.clear(skia.ColorWHITE)
+
+    def raster_chrome(self):
+        canvas = self.chrome_surface.getCanvas()
+        canvas.clear(skia.ColorWHITE)
+
     def draw(self):
         canvas = self.root_surface.getCanvas()
         canvas.clear(skia.ColorWHITE)
-
-        self.active_tab.draw(canvas, self.chrome.bottom)
+        self.active_tab.raster(canvas, self.chrome.bottom)
 
         for cmd in self.chrome.paint():
             cmd.execute(0, canvas)
@@ -138,11 +161,27 @@ class Browser:
         sdl2.SDL_BlitSurface(sdl_surface, rect, window_surface, rect)
         sdl2.SDL_UpdateWindowSurface(self.sdl_window)
 
+        tab_rect = skia.Rect.MakeLTRB(0, self.chrome.bottom, WIDTH, HEIGHT)
+        tab_offset = self.chrome.bottom - self.active_tab.scroll
+        canvas.save()
+        canvas.clipRect(tab_rect)
+        canvas.translate(0, tab_offset)
+        self.tab_surface.draw(canvas, 0, 0)
+        canvas.restore()
+
+        chrome_rect = skia.Rect.MakeLTRB(0, 0, WIDTH, self.chrome.bottom)
+        canvas.save()
+        canvas.clipRect(chrome_rect)
+        self.chrome_surface.draw(canvas, 0, 0)
+        canvas.restore()
+
     def new_tab(self, url):
         new_tab = Tab(HEIGHT - self.chrome.bottom)
         new_tab.load(url)
         self.active_tab = new_tab
         self.tabs.append(new_tab)
+        self.raster_tab()
+        self.raster_chrome()
         self.draw()
 
 

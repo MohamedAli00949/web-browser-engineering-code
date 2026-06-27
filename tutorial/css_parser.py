@@ -199,18 +199,8 @@ class DrawText:
             AntiAlias=True,
             Color=parse_color(self.color),
         )
-        # FIX: fAscent is negative in Skia, subtract it to move baseline down correctly
         baseline = self.top - scroll - self.font.getMetrics().fAscent
         canvas.drawString(self.text, float(self.left), baseline, self.font, paint)
-
-        # canvas.create_text(
-        #     self.left,
-        #     self.top - scroll,
-        #     text=self.text,
-        #     font=self.font,
-        #     anchor="nw",
-        #     fill=self.color,
-        # )
 
 
 class DrawRRect:
@@ -221,7 +211,6 @@ class DrawRRect:
 
     def execute(self, scroll, canvas):
         sk_color = parse_color(self.color)
-        # FIX: apply scroll offset vertically
         moved = self.rect.makeOffset(0, -scroll)
         rrect = skia.RRect.MakeRectXY(moved, self.rrect.getSimpleRadii().fX, self.rrect.getSimpleRadii().fY)
         canvas.drawRRect(rrect, skia.Paint(Color=sk_color))
@@ -234,15 +223,6 @@ class DrawOutline:
         self.thickness = thickness
 
     def execute(self, scroll, canvas):
-        # canvas.create_rectangle(
-        #     self.rect.left,
-        #     self.rect.top - scroll,
-        #     self.rect.right,
-        #     self.rect.bottom - scroll,
-        #     width=self.thickness,
-        #     outline=self.color,
-        # )
-
         paint = skia.Paint(
             Color=parse_color(self.color),
             StrokeWidth=self.thickness,
@@ -272,15 +252,6 @@ class DrawLine:
         )
 
         canvas.drawPath(path, paint)
-
-        # canvas.create_line(
-        #     self.rect.left,
-        #     self.rect.top - scroll,
-        #     self.rect.right,
-        #     self.rect.bottom - scroll,
-        #     fill=self.color,
-        #     width=self.thickness,
-        # )
 
 
 class TextLayout:
@@ -445,15 +416,11 @@ class BlockLayout:
         self.width = None
         self.height = None
 
-        # self.line = []
         self.display_list = []
         self.weight = "normal"
         self.style = "roman"
         self.cursor_x, self.cursor_y = HSTEP, VSTEP
         self.size = 12
-        # self.word_font = skia.Font(
-        #     family="Times", size=self.size, weight=self.weight, slant=self.style
-        # )
         self.word_font = get_font(self.size, self.weight, self.style)
 
         for child in self.children:
@@ -468,8 +435,6 @@ class BlockLayout:
         bgcolor = self.node.style.get("background-color", "transparent")
 
         if bgcolor != "transparent":
-            # x2, y2 = self.x + self.width, self.y + self.height
-            # rect = DrawRRect(self.x, self.y, x2, y2, bgcolor)
             radius = float(
                 self.node.style.get("border-radius", "0px")[:-2]
             )
@@ -565,12 +530,6 @@ class BlockLayout:
             self.style = "roman"
         elif tag == "b":
             self.weight = "normal"
-        # elif tag == "h1":
-        #     self.size -= 20
-        # elif tag == "h2":
-        #     self.size -= 10
-        # elif tag == "h3":
-        #     self.size -= 5
         elif tag == "small":
             self.size += 2
         elif tag == "big":
