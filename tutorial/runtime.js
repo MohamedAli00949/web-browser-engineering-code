@@ -73,3 +73,30 @@ function __runSetTimeout(handle) {
   var callback = SET_TIMEOUT_REQUESTS[handle]
   callback();
 }
+
+XML_REQUESTS = {}
+
+function XMLHttpRequest() {
+  this.handle = Object.keys(XML_REQUESTS).length;
+
+  XML_REQUESTS[this.handle] = this;
+}
+
+XMLHttpRequest.prototype.open = function (method, url, is_async) {
+  this.is_async = is_async;
+  this.method = method;
+  this.url = url;
+}
+
+XMLHttpRequest.prototype.send = function (body) {
+  this.responseText = call_python("XMLHttpRequest_send",
+    this.method, this.url, body, this.is_async, this.handle);
+}
+
+function __runXHROnload(body, handle) {
+  var obj = XHR_REQUESTS[handle];
+  var evt = new Event("load");
+  obj.responseText = body;
+  if (obj.onload)
+    obj.onload(evt);
+}

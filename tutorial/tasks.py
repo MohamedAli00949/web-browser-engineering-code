@@ -17,16 +17,17 @@ class TaskRunner:
     self.condition = threading.Condition()
 
   def schedule_task(self, task):
-    with self.condition:
-      self.tasks.append(task)
-      self.condition.notify_all()
+    # with self.condition:
+    #   self.tasks.append(task)
+    #   self.condition.notify_all()
 
-    # self.condition.acquire(blocking=True)
-    # self.tasks.append(task)
-    # self.condition.notify_all()
-    # self.condition.release()
+    self.condition.acquire(blocking=True)
+    self.tasks.append(task)
+    self.condition.notify_all()
+    self.condition.release()
 
   def run(self):
+    """Blocking loop: used by the background task-runner thread."""
     while True:
       task = None
       self.condition.acquire(blocking=True)

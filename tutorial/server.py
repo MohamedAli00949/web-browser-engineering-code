@@ -80,7 +80,7 @@ def do_request(session, method, url, headers, body):
         return "200 OK", show_comments(session, out)
     elif method == "GET" and url == "/login":
         return "200 OK", login_form(session)
-    elif method == "POST" and url == "/":
+    elif method == "POST" and url == "/login":
         params = form_decode(body)
         return do_login(session, params)
     elif method == "POST" and url == "/add":
