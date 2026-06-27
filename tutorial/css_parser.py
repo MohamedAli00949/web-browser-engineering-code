@@ -181,6 +181,9 @@ class DocumentLayout:
     def should_paint(self):
         return True
 
+    def paint_effects(self, cmds):
+        return cmds
+
 
 class DrawText:
     def __init__(self, x1, y1, text, font, color):
@@ -294,6 +297,9 @@ class TextLayout:
     def should_paint(self):
         return True
 
+    def paint_effects(self, cmds):
+        return cmds
+
 
 class InputLayout:
     def __init__(self, node, parent, previous):
@@ -361,6 +367,9 @@ class InputLayout:
     def should_paint(self):
         return True
 
+    def paint_effects(self, cmds):
+        return cmds
+
 
 class LineLayout:
     def __init__(self, node, parent, previous):
@@ -403,6 +412,86 @@ class LineLayout:
     def should_paint(self):
         return True
 
+    def paint_effects(self, cmds):
+        return cmds
+
+
+class Opacity:
+    def __init__(self, opacity, children):
+        self.opacity = opacity
+        self.children = children
+        self.rect = skia.Rect.MakeEmpty()
+        for cmd in self.children:
+            self.rect.join(cmd.rect)
+
+    def execute(self, scroll, canvas):
+        paint = skia.Paint(
+            Alphaf=self.opacity
+        )
+
+        if self.opacity < 1:
+            canvas.saveLayer(None, paint)
+        for cmd in self.children:
+            cmd.execute(scroll, canvas)
+        if self.opacity < 1:
+            canvas.restore()
+
+def parse_blend_mode(blend_mode_str):
+    if blend_mode_str == "multiply":
+        return skia.BlendMode.kMultiply
+    elif blend_mode_str == "difference":
+        return skia.BlendMode.kDifference
+    elif blend_mode_str == "destination-in":
+        return skia.BlendMode.kDstIn
+    elif blend_mode_str == 'source-over':
+        return skia.BlendMode.kSrcOver
+    else:
+        return skia.BlendMode.kSrcOver
+    
+
+class Blend:
+    def __init__(self, opacity, blend_mode, children):
+        self.opacity = opacity
+        self.blend_mode = blend_mode
+        self.should_save = self.blend_mode or self.opacity < 1
+        self.children = children
+        self.rect = skia.Rect.MakeEmpty()
+        for cmd in self.children:
+            self.rect.join(cmd.rect)
+
+    def execute(self, scroll, canvas):
+        paint = skia.Paint(
+            Alphaf=self.opacity, 
+            BlendMode=parse_blend_mode(self.blend_mode)
+        )
+        if self.should_save:
+            canvas.saveLayer(None, paint)
+        
+        for cmd in self.children:
+            cmd.execute(scroll, canvas)
+        if self.should_save:
+            canvas.restore()
+
+def paint_visual_effects(node, cmds, rect):
+    opacity = float(node.style.get("opacity", "1.0"))
+    blend_mode = node.style.get("mix-blend-mode")
+
+    if node.style.get("overflow", "visible") == "clip":
+        if not blend_mode:
+            blend_mode = "source-over"
+
+    if node.style.get("overflow", "visible") == "clip":
+        border_radius = float(node.style.get("border-radius", "0px")[0:-2])
+        cmds.append(
+            Blend(1.0, "destination-in", [
+                    DrawRRect(rect, border_radius, "black")
+                ]
+            )
+        )
+
+    return [
+        Blend(opacity, blend_mode, cmds)
+    ]
 
 class BlockLayout:
     def __init__(self, node, parent, previous):
@@ -589,3 +678,8 @@ class BlockLayout:
         return isinstance(self.node, Text) or (
             self.node.tag != "input" and self.node.tag != "button"
         )
+
+    def paint_effects(self, cmds):
+        cmds = paint_visual_effects(self.node, cmds, self.self_rect())
+
+        return cmds
