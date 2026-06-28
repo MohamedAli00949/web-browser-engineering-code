@@ -39,7 +39,7 @@ def mainloop(browser):
             elif event.type == sdl2.SDL_TEXTINPUT:
                 browser.handle_key(event.text.text.decode('utf8'))
 
-        browser.active_tab.task_runner.run()
+        # browser.active_tab.task_runner.run()
         browser.raster_and_draw()
         browser.schedule_animation_frame()
 
