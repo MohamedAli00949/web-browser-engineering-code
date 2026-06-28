@@ -16,6 +16,8 @@ from css_parser import *
 from tab import Tab
 from chrome import Chrome
 from utils import *
+from constants import *
+from tasks import *
 
 def mainloop(browser):
     event = sdl2.SDL_Event()
@@ -37,6 +39,9 @@ def mainloop(browser):
             elif event.type == sdl2.SDL_TEXTINPUT:
                 browser.handle_key(event.text.text.decode('utf8'))
 
+        browser.active_tab.task_runner.run()
+        browser.raster_and_draw()
+        browser.schedule_animation_frame()
 
 class Browser:
     def __init__(self):
@@ -65,21 +70,13 @@ class Browser:
                 at=skia.kUnpremul_AlphaType
             )
         )
-        # self.window = tkinter.Tk()
-        # self.canvas = tkinter.Canvas(
-        #     self.window, width=WIDTH, height=HEIGHT, bg="white"
-        # )
-        # self.canvas.pack()
-        # self.window.bind("<Up>", self.handle_up)
-        # self.window.bind("<Down>", self.handle_down)
-        # self.window.bind("<Button-1>", self.handle_click)
-        # self.window.bind("<Key>", self.handle_key)
-        # self.window.bind("<Return>", self.handle_enter)
 
         self.chrome = Chrome(self)
 
         self.chrome_surface = skia.Surface(WIDTH, math.ceil(self.chrome.bottom))
         self.tab_surface = None
+
+        self.needs_raster_and_draw = False
 
     def handle_quit(self):
         sdl2.SDL_DestroyWindow(self.sdl_window)
@@ -88,15 +85,21 @@ class Browser:
         self.active_tab.scrollup()
         self.draw()
 
+        self.set_needs_raster_and_draw()
+
     def handle_down(self):
         self.active_tab.scrolldown()
         self.draw()
+
+        self.set_needs_raster_and_draw()
 
     def handle_click(self, e):
         if e.y < self.chrome.bottom:
             self.focus = None
             self.chrome.click(e.x, e.y)
             self.raster_chrome()
+
+            self.set_needs_raster_and_draw()
         else:
             self.focus = "content"
             self.chrome.blur()
@@ -113,15 +116,19 @@ class Browser:
             return
         if not (0x20 <= ord(char) < 0x7F):
             return
+
         if self.chrome.keypress(char):
             self.draw()
+            self.set_needs_raster_and_draw()
         elif self.focus == 'content':
             self.active_tab.keypress(char)
             self.draw()
 
     def handle_enter(self):
-        self.chrome.enter()
-        self.draw()
+        if self.chrome.enter():
+            self.draw()
+
+            self.set_needs_raster_and_draw()
 
     def raster_tab(self):
         tab_height = math.ceil(
@@ -175,8 +182,28 @@ class Browser:
         self.chrome_surface.draw(canvas, 0, 0)
         canvas.restore()
 
+    def set_needs_raster_and_draw(self):
+        self.needs_raster_and_draw = True
+
+    def raster_and_draw(self):
+        if not self.needs_raster_and_draw:
+            return
+
+        self.raster_chrome()
+        self.raster_tab()
+        self.draw()
+
+        self.needs_raster_and_draw = False
+
+    def schedule_animation_frame(self):
+        def callback():
+            active_tab = self.active_tab
+            task = Task(active_tab.render)
+            active_tab.task_runner.schedule_task(task)
+        threading.Timer(REFRESH_RATE_SEC, callback).start()
+
     def new_tab(self, url):
-        new_tab = Tab(HEIGHT - self.chrome.bottom)
+        new_tab = Tab(self, HEIGHT - self.chrome.bottom)
         new_tab.load(url)
         self.active_tab = new_tab
         self.tabs.append(new_tab)

@@ -10,7 +10,7 @@ from jscontext import JSContext
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
 class Tab:
-    def __init__(self, tab_height):
+    def __init__(self, browser, tab_height):
         self.history = []
         self.display_list = []
         self.scroll = 0
@@ -26,13 +26,8 @@ class Tab:
         )
         self.task_runner_thread.start()
 
-        # print("fonts: ", font.families())
-        # self.bi_times = font.Font(
-        #     family="Times",
-        #     size=16,
-        #     weight="bold",
-        #     slant="italic",
-        # )
+        self.need_render = False
+        self.browser = browser
 
     def scrollup(self):
         self.scroll = max(0, self.scroll - SCROLL_STEP)
@@ -48,6 +43,9 @@ class Tab:
             if cmd.rect.bottom() < self.scroll:
                 continue
             cmd.execute(self.scroll - offset, canvas)
+
+    def set_needs_render(self):
+        self.need_render = True
 
     def load(self, url, payload=None):
         headers, body = url.request(self.url, payload)
@@ -113,9 +111,14 @@ class Tab:
                     print("Failed to load script: ", style_url, "Error:", e)  # ← print the error
                     continue
                 self.rules.extend(CSSParser(style_body).parse())
+            self.set_needs_render()
             self.render()
 
+        self.set_needs_render()
+
     def click(self, x, y):
+        self.set_needs_render()
+        self.render()
         # x, y = e.x, e.y
         self.focus = None
 
@@ -141,6 +144,7 @@ class Tab:
                     self.focus.is_focused = False
                 self.focus = elt
                 self.focus.is_focused = True
+                self.set_needs_render()
                 return self.render()
             elif elt.tag == "button":
                 if self.js.dispatch_event("click", elt): return
@@ -178,11 +182,14 @@ class Tab:
             self.load(back)
 
     def render(self):
+        if not self.need_render: return
         style(self.nodes, sorted(self.rules, key=cascade_priority))
         self.document = DocumentLayout(self.nodes)
         self.document.layout()
         self.display_list = []
         paint_tree(self.document, self.display_list)
+        self.need_render = False
+        self.browser.set_needs_raster_and_draw()
 
     def keypress(self, char):
         if self.focus:
@@ -191,6 +198,7 @@ class Tab:
                 self.focus.attributes["value"] = (
                     self.focus.attributes.get("value", "") + char
                 )
+                self.set_needs_render()
                 self.render()
 
     def allowed_request(self, url):

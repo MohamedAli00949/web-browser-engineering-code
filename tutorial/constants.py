@@ -62,3 +62,5 @@ NAMED_COLORS = {
     "gray": "#808080",
     "transparent": None,
 }
+
+REFRESH_RATE_SEC = .033

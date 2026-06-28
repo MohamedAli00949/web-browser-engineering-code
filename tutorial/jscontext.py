@@ -74,6 +74,8 @@ class JSContext:
       child.parent = elt
 
     self.tab.render()
+    self.tab.set_needs_render()
+
   def XMLHttpRequest_send(self, method, url, body, isasync, handle):
     full_url = self.tab.url.resolve(url)
 

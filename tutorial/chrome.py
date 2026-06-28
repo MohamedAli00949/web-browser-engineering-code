@@ -157,6 +157,8 @@ class Chrome:
         if self.focus == "address_bar":
             self.browser.active_tab.load(URL(self.address_bar))
             self.focus = None
+            return True
+        return False
 
     def click(self, x, y):
         if self.newtab_rect.contains(x, y):
