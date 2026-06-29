@@ -46,6 +46,7 @@ class Tab:
 
     def set_needs_render(self):
         self.need_render = True
+        self.browser.set_needs_animation_frame(self)
 
     def load(self, url, payload=None):
         headers, body = url.request(self.url, payload)
@@ -183,6 +184,7 @@ class Tab:
 
     def render(self):
         if not self.need_render: return
+        self.js.interp.evaljs("__runRAFHandlers()")
         style(self.nodes, sorted(self.rules, key=cascade_priority))
         self.document = DocumentLayout(self.nodes)
         self.document.layout()

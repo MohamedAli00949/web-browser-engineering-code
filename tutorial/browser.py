@@ -45,6 +45,7 @@ def mainloop(browser):
 
 class Browser:
     def __init__(self):
+        self.animation_timer = None
         if sdl2.SDL_BYTEORDER == sdl2.SDL_BIG_ENDIAN:
             self.RED_MASK = 0xff000000
             self.GREEN_MASK = 0x00ff0000
@@ -77,6 +78,7 @@ class Browser:
         self.tab_surface = None
 
         self.needs_raster_and_draw = False
+        self.needs_animation_frame = True
 
     def handle_quit(self):
         sdl2.SDL_DestroyWindow(self.sdl_window)
@@ -200,7 +202,13 @@ class Browser:
             active_tab = self.active_tab
             task = Task(active_tab.render)
             active_tab.task_runner.schedule_task(task)
-        threading.Timer(REFRESH_RATE_SEC, callback).start()
+        if self.needs_animation_frame and not self.animation_timer:
+            self.animation_timer = threading.Timer(REFRESH_RATE_SEC, callback)
+            self.animation_timer.start()
+
+    def set_needs_animation_frame(self, tab):
+        if tab == self.active_tab:
+            self.needs_animation_frame = True
 
     def new_tab(self, url):
         new_tab = Tab(self, HEIGHT - self.chrome.bottom)

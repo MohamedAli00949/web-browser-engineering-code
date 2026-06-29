@@ -100,3 +100,18 @@ function __runXHROnload(body, handle) {
   if (obj.onload)
     obj.onload(evt);
 }
+
+RAF_LISTENERS = []
+
+function requestAnimationFrame(callback) {
+  RAF_LISTENERS.push(callback);
+  call_python("requestAnimationFrame");
+}
+
+function __runRAFHandlers() {
+  var handlers_copy = RAF_LISTENERS;
+  RAF_LISTENERS = [];
+  for (var i = 0; i < handlers_copy.length; i++) {
+    handlers_copy[i]();
+  }
+}

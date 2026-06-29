@@ -19,6 +19,7 @@ class JSContext:
     self.interp.export_function("innerHTML", self.innerHTML_set)
     self.interp.export_function("XMLHttpRequest_send", self.XMLHttpRequest_send)
     self.interp.export_function("setTimeout", self.setTimeout)
+    self.interp.export_function("requestAnimationFrame", self.requestAnimationFrame)
     self.interp.evaljs(RUNTIME_JS)
 
     self.node_to_handle = {}
@@ -110,3 +111,8 @@ class JSContext:
   def dispatch_setimout(self, handle):
     if self.discarded: return
     self.interp.evaljs(SETTIMEOUT_JS, handle=handle)
+
+  def requestAnimationFrame(self, callback):
+    task = Task(callback)
+    self.tab.task_runner.schedule_task(task)
+    self.tab.browser.set_needs_animation_frame(self.tab)
