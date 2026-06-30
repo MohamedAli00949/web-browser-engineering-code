@@ -106,15 +106,6 @@ class Chrome:
 
         cmds.append(DrawOutline(self.address_rect, "black", 1))
         url = str(self.browser.active_tab.url)
-        # cmds.append(
-        #     DrawText(
-        #         self.address_rect.left + self.padding,
-        #         self.address_rect.top,
-        #         url,
-        #         self.font,
-        #         "black",
-        #     )
-        # )
 
         if self.focus == "address_bar":
             cmds.append(
@@ -155,17 +146,14 @@ class Chrome:
     
     def enter(self):
         if self.focus == "address_bar":
-            self.browser.active_tab.load(URL(self.address_bar))
+            self.browser.schedule_load(URL(self.address_bar))
             self.focus = None
             return True
         return False
 
     def click(self, x, y):
         if self.newtab_rect.contains(x, y):
-            # self.browser.new_tab(URL("https://browser.engineering/examples/example11-rounded-background.html"))
-            
-            # self.browser.new_tab(URL("https://example.org"))
-            self.browser.new_tab(URL("http://localhost:8000"))
+            self.browser.new_tab_internal(URL("https://browser.engineering/"))
         elif self.back_rect.contains(x, y):
             self.browser.active_tab.go_back()
         elif self.address_rect.contains(x, y):

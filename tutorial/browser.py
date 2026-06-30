@@ -82,17 +82,27 @@ class Browser:
         self.needs_raster_and_draw = False
         self.needs_animation_frame = True
 
+        self.lock = threading.Lock()
+
+        threading.current_thread().name = "Browser Thread"
+
     def handle_quit(self):
+        for tab in self.tabs:
+            tab.task_runner.set_needs_quit()
         sdl2.SDL_DestroyWindow(self.sdl_window)
 
     def handle_up(self):
-        self.active_tab.scrollup()
+        # self.active_tab.scrollup()
+        task = Task(self.active_tab.scrollup)
+        self.active_tab.task_runner.schedule_task(task)
         self.draw()
 
         self.set_needs_raster_and_draw()
 
     def handle_down(self):
-        self.active_tab.scrolldown()
+        # self.active_tab.scrolldown()
+        task = Task(self.active_tab.scrollup)
+        self.active_tab.task_runner.schedule_task(task)
         self.draw()
 
         self.set_needs_raster_and_draw()
@@ -109,7 +119,9 @@ class Browser:
             self.chrome.blur()
             url = self.active_tab.url
             tab_y = e.y - self.chrome.bottom
-            self.active_tab.click(e.x, tab_y)
+            # self.active_tab.click(e.x, tab_y)
+            task = Task(self.active_tab.click, e.x, tab_y)
+            self.active_tab.task_runner.schedule_task(task)
             if self.active_tab.url != url:
                 self.raster_chrome()
             self.raster_tab()
@@ -125,7 +137,8 @@ class Browser:
             self.draw()
             self.set_needs_raster_and_draw()
         elif self.focus == 'content':
-            self.active_tab.keypress(char)
+            task = Task(self.active_tab.keypress, char)
+            self.active_tab.task_runner.schedule_task(task)
             self.draw()
 
     def handle_enter(self):
@@ -135,6 +148,8 @@ class Browser:
             self.set_needs_raster_and_draw()
 
     def raster_tab(self):
+        if not hasattr(self.active_tab, 'document'): return
+
         tab_height = math.ceil(
             self.active_tab.document.height + 2*VSTEP
         )
@@ -213,14 +228,31 @@ class Browser:
         if tab == self.active_tab:
             self.needs_animation_frame = True
 
+    def schedule_load(self, url, body=None):
+        self.active_tab.task_runner.clear_pending_tasks()
+        task = Task(self.active_tab.load, url, body)
+        self.active_tab.task_runner.schedule_task(task)
+
+    def set_active_tab(self, tab):
+        self.active_tab = tab
+        self.needs_animation_frame = True
+
     def new_tab(self, url):
+        # new_tab.load(url)
+        # self.active_tab = new_tab
+        # self.raster_tab()
+        # self.raster_chrome()
+        # self.draw()
+        # self.schedule_load(url)
+        self.lock.acquire(blocking=True)
+        self.new_tab_internal(url)
+        self.lock.release()
+
+    def new_tab_internal(self, url):
         new_tab = Tab(self, HEIGHT - self.chrome.bottom)
-        new_tab.load(url)
-        self.active_tab = new_tab
         self.tabs.append(new_tab)
-        self.raster_tab()
-        self.raster_chrome()
-        self.draw()
+        self.set_active_tab(new_tab)
+        self.schedule_load(url)
 
 
 if __name__ == "__main__":
