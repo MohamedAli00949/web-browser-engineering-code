@@ -184,6 +184,7 @@ class Tab:
 
     def render(self):
         if not self.need_render: return
+        self.browser.measure.time("render")
         self.js.interp.evaljs("__runRAFHandlers()")
         style(self.nodes, sorted(self.rules, key=cascade_priority))
         self.document = DocumentLayout(self.nodes)
@@ -192,6 +193,7 @@ class Tab:
         paint_tree(self.document, self.display_list)
         self.need_render = False
         self.browser.set_needs_raster_and_draw()
+        self.browser.measure.stop("render")
 
     def keypress(self, char):
         if self.focus:

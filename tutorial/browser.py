@@ -18,6 +18,7 @@ from chrome import Chrome
 from utils import *
 from constants import *
 from tasks import *
+from measure_time import *
 
 def mainloop(browser):
     event = sdl2.SDL_Event()
@@ -45,6 +46,7 @@ def mainloop(browser):
 
 class Browser:
     def __init__(self):
+        self.measure = MeasureTime()
         self.animation_timer = None
         if sdl2.SDL_BYTEORDER == sdl2.SDL_BIG_ENDIAN:
             self.RED_MASK = 0xff000000
@@ -190,12 +192,13 @@ class Browser:
     def raster_and_draw(self):
         if not self.needs_raster_and_draw:
             return
-
+        self.measure.time('raster/draw')
         self.raster_chrome()
         self.raster_tab()
         self.draw()
 
         self.needs_raster_and_draw = False
+        self.measure.stop('raster/draw')
 
     def schedule_animation_frame(self):
         def callback():
