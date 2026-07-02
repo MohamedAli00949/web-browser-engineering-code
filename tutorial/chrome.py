@@ -105,7 +105,7 @@ class Chrome:
         )
 
         cmds.append(DrawOutline(self.address_rect, "black", 1))
-        url = str(self.browser.active_tab.url)
+        url = str(self.browser.active_tab_url)
 
         if self.focus == "address_bar":
             cmds.append(
@@ -125,7 +125,7 @@ class Chrome:
                 self.address_rect.bottom(),
                 "red", 1))
         else:
-            url = str(self.browser.active_tab.url)
+            url = str(self.browser.active_tab_url)
             cmds.append(
                 DrawText(
                     self.address_rect.left() + self.padding,

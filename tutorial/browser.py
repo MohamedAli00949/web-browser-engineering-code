@@ -40,7 +40,6 @@ def mainloop(browser):
             elif event.type == sdl2.SDL_TEXTINPUT:
                 browser.handle_key(event.text.text.decode('utf8'))
 
-        # browser.active_tab.task_runner.run()
         browser.raster_and_draw()
         browser.schedule_animation_frame()
 
@@ -86,28 +85,48 @@ class Browser:
 
         threading.current_thread().name = "Browser Thread"
 
+        self.active_tab_url = None
+        self.active_tab_scroll = 0
+        self.active_tab_height = 0
+        self.active_tab_display_list = None
+
+    def commit(self, tab, data):
+        self.lock.acquire()
+        if tab == self.active_tab:
+            self.active_tab_url = data.url
+            self.active_tab_scroll = data.scroll
+            self.active_tab_height = data.height
+            if data.display_list:
+                self.active_tab_display_list = data.display_list
+            self.animation_timer = None
+            self.set_needs_raster_and_draw()
+        self.lock.release()
+
     def handle_quit(self):
         for tab in self.tabs:
             tab.task_runner.set_needs_quit()
         sdl2.SDL_DestroyWindow(self.sdl_window)
 
     def handle_up(self):
-        # self.active_tab.scrollup()
+        self.lock.acquire(blocking=True)
         task = Task(self.active_tab.scrollup)
         self.active_tab.task_runner.schedule_task(task)
         self.draw()
 
         self.set_needs_raster_and_draw()
+        self.lock.release()
 
     def handle_down(self):
-        # self.active_tab.scrolldown()
+        self.lock.acquire(blocking=True)
         task = Task(self.active_tab.scrollup)
         self.active_tab.task_runner.schedule_task(task)
         self.draw()
 
         self.set_needs_raster_and_draw()
+        self.lock.release()
 
     def handle_click(self, e):
+        self.lock.acquire(blocking=True)
         if e.y < self.chrome.bottom:
             self.focus = None
             self.chrome.click(e.x, e.y)
@@ -126,8 +145,10 @@ class Browser:
                 self.raster_chrome()
             self.raster_tab()
         self.draw()
+        self.lock.release()
 
     def handle_key(self, char):
+        self.lock.acquire(blocking=True)
         if len(char) == 0:
             return
         if not (0x20 <= ord(char) < 0x7F):
@@ -140,12 +161,15 @@ class Browser:
             task = Task(self.active_tab.keypress, char)
             self.active_tab.task_runner.schedule_task(task)
             self.draw()
+        self.lock.release()
 
     def handle_enter(self):
+        self.lock.acquire(blocking=True)
         if self.chrome.enter():
             self.draw()
 
             self.set_needs_raster_and_draw()
+        self.lock.release()
 
     def raster_tab(self):
         if not hasattr(self.active_tab, 'document'): return
@@ -205,6 +229,7 @@ class Browser:
         self.needs_raster_and_draw = True
 
     def raster_and_draw(self):
+        self.lock.acquire(blocking=True)
         if not self.needs_raster_and_draw:
             return
         self.measure.time('raster/draw')
@@ -214,19 +239,26 @@ class Browser:
 
         self.needs_raster_and_draw = False
         self.measure.stop('raster/draw')
+        self.lock.release()
 
     def schedule_animation_frame(self):
         def callback():
+            self.lock.acquire(blocking=True)
             active_tab = self.active_tab
-            task = Task(active_tab.render)
+            task = Task(active_tab.run_animation_frame)
             active_tab.task_runner.schedule_task(task)
+            self.lock.release()
+        self.lock.acquire(blocking=True)
         if self.needs_animation_frame and not self.animation_timer:
             self.animation_timer = threading.Timer(REFRESH_RATE_SEC, callback)
             self.animation_timer.start()
+        self.lock.release()
 
     def set_needs_animation_frame(self, tab):
+        self.lock.acquire(blocking=True)
         if tab == self.active_tab:
             self.needs_animation_frame = True
+        self.lock.release()
 
     def schedule_load(self, url, body=None):
         self.active_tab.task_runner.clear_pending_tasks()

@@ -9,6 +9,19 @@ from jscontext import JSContext
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
+class CommitData:
+    def __init__(
+            self, 
+            url, 
+            scroll, 
+            height, 
+            display_list
+        ):
+        self.url = url
+        self.scroll = scroll
+        self.height = height
+        self.display_list = display_list
+
 class Tab:
     def __init__(self, browser, tab_height):
         self.history = []
@@ -28,6 +41,18 @@ class Tab:
 
         self.need_render = False
         self.browser = browser
+
+    def run_animation_frame(self):
+        self.js.interp.evaljs("__runRAFHandlers()")
+        self.render()
+        commit_data = CommitData(
+            self.url,
+            self.scroll,
+            self.document.height,
+            self.display_list
+        )
+        self.display_list = None
+        self.browser.commit(self, commit_data)
 
     def scrollup(self):
         self.scroll = max(0, self.scroll - SCROLL_STEP)
