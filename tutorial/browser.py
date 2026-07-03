@@ -88,16 +88,31 @@ class Browser:
         self.active_tab_url = None
         self.active_tab_scroll = 0
         self.active_tab_height = 0
-        self.active_tab_display_list = None
+        self.active_tab_display_list = []
+
+    def clamp_scroll(self, scroll):
+        height = self.active_tab_height
+        maxscroll = height - (HEIGHT - self.chrome.bottom)
+        return max(0, min(scroll, maxscroll))
 
     def commit(self, tab, data):
         self.lock.acquire()
         if tab == self.active_tab:
             self.active_tab_url = data.url
-            self.active_tab_scroll = data.scroll
-            self.active_tab_height = data.height
-            if data.display_list:
+            if data.scroll is not None:
+                self.active_tab_scroll = data.scroll
+                self.active_tab.scroll = data.scroll
+            else:
+                self.active_tab_scroll = 0
+                self.active_tab.scroll = 0
+
+            self.active_tab_height = data.height if data.height is not None else 0
+
+            if data.display_list is not None:
                 self.active_tab_display_list = data.display_list
+            else:
+                self.active_tab_display_list = []
+
             self.animation_timer = None
             self.set_needs_raster_and_draw()
         self.lock.release()
@@ -109,20 +124,40 @@ class Browser:
 
     def handle_up(self):
         self.lock.acquire(blocking=True)
-        task = Task(self.active_tab.scrollup)
-        self.active_tab.task_runner.schedule_task(task)
-        self.draw()
+
+        if not self.active_tab_height:
+            self.lock.release()
+            return
+
+        # task = Task(self.active_tab.scrollup)
+        # self.active_tab.task_runner.schedule_task(task)
+        # self.draw()
+
+        self.active_tab_scroll = self.clamp_scroll(
+            self.active_tab_scroll - SCROLL_STEP
+        )
+
 
         self.set_needs_raster_and_draw()
         self.lock.release()
 
     def handle_down(self):
         self.lock.acquire(blocking=True)
-        task = Task(self.active_tab.scrollup)
-        self.active_tab.task_runner.schedule_task(task)
-        self.draw()
+
+        if not self.active_tab_height:
+            self.lock.release()
+            return
+
+        # task = Task(self.active_tab.scrolldown)
+        # self.active_tab.task_runner.schedule_task(task)
+        # self.draw()
+
+        self.active_tab_scroll = self.clamp_scroll(
+            self.active_tab_scroll + SCROLL_STEP
+        )
 
         self.set_needs_raster_and_draw()
+        self.needs_animation_frame = True
         self.lock.release()
 
     def handle_click(self, e):
@@ -189,17 +224,57 @@ class Browser:
         canvas.clear(skia.ColorWHITE)
 
     def draw(self):
+        # Ensure active_tab.scroll is not None
+        if self.active_tab and self.active_tab.scroll is None:
+            self.active_tab.scroll = 0
+        
         canvas = self.root_surface.getCanvas()
         canvas.clear(skia.ColorWHITE)
-        self.active_tab.raster(canvas, self.chrome.bottom)
-
+        
+        # Debug: Check if we have display list
+        if self.active_tab:
+            print(f"Drawing tab with display_list: {len(self.active_tab.display_list) if self.active_tab.display_list else 0} items")
+            if self.active_tab.display_list:
+                self.active_tab.raster(canvas, self.chrome.bottom)
+            else:
+                # Draw a placeholder message
+                paint = skia.Paint(Color=skia.ColorBLACK, AntiAlias=True)
+                font = skia.Font(skia.Typeface('Arial'), 24)
+                canvas.drawString("Loading...", 50, 100, font, paint)
+        else:
+            # Draw a placeholder message
+            paint = skia.Paint(Color=skia.ColorBLACK, AntiAlias=True)
+            font = skia.Font(skia.Typeface('Arial'), 24)
+            canvas.drawString("No active tab", 50, 100, font, paint)
+        
+        # Draw chrome
         for cmd in self.chrome.paint():
             cmd.execute(0, canvas)
-
+        
+        # Draw tab surface if it exists
+        if self.active_tab and hasattr(self, 'tab_surface') and self.tab_surface:
+            tab_rect = skia.Rect.MakeLTRB(0, self.chrome.bottom, WIDTH, HEIGHT)
+            scroll_value = self.active_tab.scroll if self.active_tab.scroll is not None else 0
+            tab_offset = self.chrome.bottom - scroll_value
+            canvas.save()
+            canvas.clipRect(tab_rect)
+            canvas.translate(0, tab_offset)
+            self.tab_surface.draw(canvas, 0, 0)
+            canvas.restore()
+        
+        # Draw chrome surface
+        chrome_rect = skia.Rect.MakeLTRB(0, 0, WIDTH, self.chrome.bottom)
+        canvas.save()
+        canvas.clipRect(chrome_rect)
+        if hasattr(self, 'chrome_surface'):
+            self.chrome_surface.draw(canvas, 0, 0)
+        canvas.restore()
+        
+        # Update the SDL window
         skia_image = self.root_surface.makeImageSnapshot()
         skia_bytes = skia_image.tobytes()
-        depth = 32 # Bits per pixel
-        pitch = 4 * WIDTH # Bytes per row
+        depth = 32
+        pitch = 4 * WIDTH
         sdl_surface = sdl2.SDL_CreateRGBSurfaceFrom(
             skia_bytes, WIDTH, HEIGHT, depth, pitch,
             self.RED_MASK, self.GREEN_MASK,
@@ -207,23 +282,8 @@ class Browser:
         )
         rect = sdl2.SDL_Rect(0, 0, WIDTH, HEIGHT)
         window_surface = sdl2.SDL_GetWindowSurface(self.sdl_window)
-        # SDL_BlitSurface is what actually does the copy.
         sdl2.SDL_BlitSurface(sdl_surface, rect, window_surface, rect)
         sdl2.SDL_UpdateWindowSurface(self.sdl_window)
-
-        tab_rect = skia.Rect.MakeLTRB(0, self.chrome.bottom, WIDTH, HEIGHT)
-        tab_offset = self.chrome.bottom - self.active_tab.scroll
-        canvas.save()
-        canvas.clipRect(tab_rect)
-        canvas.translate(0, tab_offset)
-        self.tab_surface.draw(canvas, 0, 0)
-        canvas.restore()
-
-        chrome_rect = skia.Rect.MakeLTRB(0, 0, WIDTH, self.chrome.bottom)
-        canvas.save()
-        canvas.clipRect(chrome_rect)
-        self.chrome_surface.draw(canvas, 0, 0)
-        canvas.restore()
 
     def set_needs_raster_and_draw(self):
         self.needs_raster_and_draw = True
@@ -231,6 +291,7 @@ class Browser:
     def raster_and_draw(self):
         self.lock.acquire(blocking=True)
         if not self.needs_raster_and_draw:
+            self.lock.release()
             return
         self.measure.time('raster/draw')
         self.raster_chrome()
@@ -244,8 +305,10 @@ class Browser:
     def schedule_animation_frame(self):
         def callback():
             self.lock.acquire(blocking=True)
+            scroll = self.active_tab_scroll
+            # self.needs_animation_frame = False
             active_tab = self.active_tab
-            task = Task(active_tab.run_animation_frame)
+            task = Task(active_tab.run_animation_frame, scroll)
             active_tab.task_runner.schedule_task(task)
             self.lock.release()
         self.lock.acquire(blocking=True)
@@ -267,6 +330,8 @@ class Browser:
 
     def set_active_tab(self, tab):
         self.active_tab = tab
+        self.active_tab_scroll = 0
+        # self.active_tab_url = None
         self.needs_animation_frame = True
 
     def new_tab(self, url):
@@ -286,6 +351,8 @@ class Browser:
         self.set_active_tab(new_tab)
         self.schedule_load(url)
 
+        if not new_tab.task_runner_thread.is_alive():
+            new_tab.task_runner_thread.start()
 
 if __name__ == "__main__":
     sdl2.SDL_Init(sdl2.SDL_INIT_EVENTS)
