@@ -165,7 +165,7 @@ class Chrome:
                 if self.tab_rect(i).contains(x, y):
                     self.browser.set_active_tab(tab)
                     active_tab = self.browser.active_tab
-                    task = Task(active_tab.run_animation_frame, active_tab.scroll)
+                    task = Task(active_tab.set_needs_render)
                     active_tab.task_runner.schedule_task(task)
                     break
 
