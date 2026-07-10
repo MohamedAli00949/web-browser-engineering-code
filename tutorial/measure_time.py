@@ -13,13 +13,13 @@ class MeasureTime:
       '"ts": ' + str(ts) + ',' +
       '"pid": 1, "cat": "__metadata",' +
       '"args": {"name": "Browser"}}')
-    
+
     self.file.flush()
 
   def time(self, name):
-    self.lock.acquire(blocking=True)
     ts = time.time() * 1000000
     tid = threading.get_ident()
+    self.lock.acquire(blocking=True)
     self.file.write(
       ', { "ph": "B", "cat": "_",' +
       '"name": "' + name + '",' +
@@ -30,9 +30,9 @@ class MeasureTime:
     self.lock.release()
 
   def stop(self, name):
-    self.lock.acquire(blocking=True)
     ts = time.time() * 1000000
     tid = threading.get_ident()
+    self.lock.acquire(blocking=True)
     self.file.write(
       ', { "ph": "E", "cat": "_",' +
       '"name": "' + name + '",' +

@@ -20,7 +20,9 @@ class JSContext:
     self.interp.export_function("XMLHttpRequest_send", self.XMLHttpRequest_send)
     self.interp.export_function("setTimeout", self.setTimeout)
     self.interp.export_function("requestAnimationFrame", self.requestAnimationFrame)
+    self.tab.browser.measure.time("script-runtime")
     self.interp.evaljs(RUNTIME_JS)
+    self.tab.browser.measure.stop("script-runtime")
 
     self.node_to_handle = {}
     self.handle_to_node = {}
@@ -29,8 +31,11 @@ class JSContext:
 
   def run(self, script, code):
     try:
-      return self.interp.evaljs(code)
+      self.tab.browser.measure.time("script-load")
+      self.interp.evaljs(code)
+      self.tab.browser.measure.stop("script-load")
     except dukpy.JSRuntimeError as e:
+      self.tab.browser.measure.stop("script-load")
       print("Script: ", script, "crashed: ", e)
 
   def querySelectorAll(self, selector_text):
@@ -74,7 +79,7 @@ class JSContext:
     for child in elt.children:
       child.parent = elt
 
-    self.tab.render()
+    # self.tab.render()
     self.tab.set_needs_render()
 
   def XMLHttpRequest_send(self, method, url, body, isasync, handle):
@@ -90,8 +95,9 @@ class JSContext:
       headers, response = full_url.request(self.tab.url, body)
       task = Task(self.dispatch_xhr_load, response, handle)
       self.tab.task_runner.schedule_task(task)
-      return response
-    
+      if not isasync:
+        return response
+
     if not isasync:
       return run_load()
     else:
@@ -99,7 +105,9 @@ class JSContext:
 
   def dispatch_xhr_onload(self, out, handle):
     if self.discarded: return
+    self.tab.browser.measure.time("script-xhr")
     do_default = self.interp.evaljs(XHR_ONLOAD_JS, out=out, handle=handle)
+    self.tab.browser.measure.stop("script-xhr")
 
   def setTimeout(self, handle, time):
     def run_callback():
@@ -110,9 +118,11 @@ class JSContext:
 
   def dispatch_setimout(self, handle):
     if self.discarded: return
+    self.tab.browser.measure.time("script-settimeout")
     self.interp.evaljs(SETTIMEOUT_JS, handle=handle)
+    self.tab.browser.measure.stop("script-settimeout")
 
   def requestAnimationFrame(self, callback):
-    task = Task(callback)
-    self.tab.task_runner.schedule_task(task)
+    # task = Task(callback)
+    # self.tab.task_runner.schedule_task(task)
     self.tab.browser.set_needs_animation_frame(self.tab)

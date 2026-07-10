@@ -12,14 +12,14 @@ class Task:
 
 class TaskRunner:
   def __init__(self, tab):
+    self.condition = threading.Condition()
     self.tab = tab
     self.tasks = []
-    self.needs_quit = False        # <-- add this
-    self.condition = threading.Condition()
     self.main_thread = threading.Thread(
       target=self.run,
       name="Main Thread"
     )
+    self.needs_quit = False
 
   def start_thread(self):
     self.main_thread.start()
@@ -52,7 +52,7 @@ class TaskRunner:
       task = None
       self.condition.acquire(blocking=True)
       if len(self.tasks) > 0:
-        task = self.tasks.pop(0)  # pop from front, not back
+        task = self.tasks.pop(0)
       self.condition.release()
       if task:
         task.run()
@@ -65,7 +65,7 @@ class TaskRunner:
   def clear_pending_tasks(self):
     self.condition.acquire(blocking=True)
     self.tasks.clear()
-    self.pending_scroll = None
+    # self.pending_scroll = None
     self.condition.release()
 
 

@@ -1,5 +1,6 @@
 from css_parser import *
 from url import URL
+from tasks import *
 
 class Chrome:
     def __init__(self, browser):
@@ -52,11 +53,10 @@ class Chrome:
 
     def paint(self):
         cmds = []
-
-        cmds.append(DrawRRect(skia.Rect.MakeLTRB(0, 0, WIDTH, self.bottom), 0, "white"))
         cmds.append(DrawLine(0, self.bottom, WIDTH, self.bottom, "black", 1))
 
         cmds.append(DrawOutline(self.newtab_rect, "black", 1))
+        cmds.append(DrawRRect(skia.Rect.MakeLTRB(0, 0, WIDTH, self.bottom), 0, "white"))
         cmds.append(
             DrawText(
                 self.newtab_rect.left() + self.padding,
@@ -66,6 +66,7 @@ class Chrome:
                 "black",
             )
         )
+
         for i, tab in enumerate(self.browser.tabs):
             bounds = self.tab_rect(i)
             cmds.append(
@@ -105,7 +106,6 @@ class Chrome:
         )
 
         cmds.append(DrawOutline(self.address_rect, "black", 1))
-        url = str(self.browser.active_tab_url)
 
         if self.focus == "address_bar":
             cmds.append(
@@ -155,14 +155,18 @@ class Chrome:
         if self.newtab_rect.contains(x, y):
             self.browser.new_tab_internal(URL("https://browser.engineering/"))
         elif self.back_rect.contains(x, y):
-            self.browser.active_tab.go_back()
+            task = Task(self.browser.active_tab.go_back)
+            self.browser.active_tab.task_runner.schedule_task(task)
         elif self.address_rect.contains(x, y):
             self.focus = "address_bar"
             self.address_bar = ""
         else:
             for i, tab in enumerate(self.browser.tabs):
                 if self.tab_rect(i).contains(x, y):
-                    self.browser.active_tab = tab
+                    self.browser.set_active_tab(tab)
+                    active_tab = self.browser.active_tab
+                    task = Task(active_tab.run_animation_frame, active_tab.scroll)
+                    active_tab.task_runner.schedule_task(task)
                     break
 
     def blur(self):
