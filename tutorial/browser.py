@@ -3,6 +3,7 @@ import sys
 import sdl2
 import skia
 import math
+import OpenGL.GL
 
 if sys.platform == "win32":
     try:
@@ -48,17 +49,24 @@ class Browser:
         self.chrome = Chrome(self)
 
         self.sdl_window = sdl2.SDL_CreateWindow(b"Browser",
-            sdl2.SDL_WINDOWPOS_CENTERED, sdl2.SDL_WINDOWPOS_CENTERED,
-            WIDTH, HEIGHT, sdl2.SDL_WINDOW_SHOWN
-        )
-        self.root_surface = skia.Surface.MakeRaster(
-            skia.ImageInfo.Make(
-                WIDTH, HEIGHT,
-                ct=skia.kRGBA_8888_ColorType, 
-                at=skia.kUnpremul_AlphaType
-            )
-        )
-        self.chrome_surface = skia.Surface(WIDTH, math.ceil(self.chrome.bottom))
+            sdl2.SDL_WINDOWPOS_CENTERED,
+            sdl2.SDL_WINDOWPOS_CENTERED,
+            WIDTH, HEIGHT,
+            sdl2.SDL_WINDOW_SHOWN | sdl2.SDL_WINDOW_OPENGL)
+        self.gl_context = sdl2.SDL_GL_CreateContext(
+            self.sdl_window)
+        print(("OpenGL initialized: vendor={}," + \
+            "renderer={}").format(
+            OpenGL.GL.glGetString(OpenGL.GL.GL_VENDOR),
+            OpenGL.GL.glGetString(OpenGL.GL.GL_RENDERER)))
+        # self.root_surface = skia.Surface.MakeRaster(
+        #     skia.ImageInfo.Make(
+        #         WIDTH, HEIGHT,
+        #         ct=skia.kRGBA_8888_ColorType, 
+        #         at=skia.kUnpremul_AlphaType
+        #     )
+        # )
+        # self.chrome_surface = skia.Surface(WIDTH, math.ceil(self.chrome.bottom))
         self.tab_surface = None
 
         self.tabs = []
@@ -90,6 +98,28 @@ class Browser:
 
         self.active_tab_height = 0
         self.active_tab_display_list = None
+
+        self.skia_context = skia.GrDirectContext.MakeGL()
+        self.root_surface = skia.Surface.MakeFromBackendRenderTarget(
+            self.skia_context,
+            skia.GrBackendRenderTarget(
+                WIDTH, HEIGHT,
+                0, 0,
+                skia.GrGLFramebufferInfo(
+                    0, OpenGL.GL.GL_RGBA8
+                )
+            ),
+            skia.kBottomLeft_GrSurfaceOrigin,
+            skia.kRGBA_8888_ColorType,
+            skia.ColorSpace.MakeSRGB()
+        )
+        self.chrome_surface = skia.Surface.MakeRenderTarget(
+            self.skia_context, skia.Budgeted.kNo,
+            skia.ImageInfo.MakeN32Premul(
+                WIDTH, math.ceil(self.chrome.bottom)),
+        )
+        assert self.root_surface is not None
+        assert self.chrome_surface is not None
 
     def render(self):
         if self.active_tab.loaded:
@@ -126,6 +156,7 @@ class Browser:
         self.measure.finish()
         for tab in self.tabs:
             tab.task_runner.set_needs_quit()
+        sdl2.SDL_GL_DeleteContext(self.gl_context)
         sdl2.SDL_DestroyWindow(self.sdl_window)
 
     def handle_up(self):
@@ -209,7 +240,11 @@ class Browser:
             return
 
         if not self.tab_surface or self.active_tab_height != self.tab_surface.height():
-            self.tab_surface = skia.Surface(WIDTH, self.active_tab_height)
+            self.tab_surface = skia.Surface.MakeRenderTarget(
+                self.skia_context, skia.Budgeted.kNo,
+                skia.ImageInfo.MakeN32Premul(
+                    WIDTH, self.active_tab_height
+                ))
 
         canvas = self.tab_surface.getCanvas()
         canvas.clear(skia.ColorWHITE)
@@ -242,20 +277,22 @@ class Browser:
         self.chrome_surface.draw(canvas, 0, 0)
         canvas.restore()
 
-        skia_image = self.root_surface.makeImageSnapshot()
-        skia_bytes = skia_image.tobytes()
+        # skia_image = self.root_surface.makeImageSnapshot()
+        # skia_bytes = skia_image.tobytes()
 
-        depth = 32 # Bits per pixel
-        pitch = 4 * WIDTH # Bytes per row
-        sdl_surface = sdl2.SDL_CreateRGBSurfaceFrom(
-            skia_bytes, WIDTH, HEIGHT, depth, pitch,
-            self.RED_MASK, self.GREEN_MASK,
-            self.BLUE_MASK, self.ALPHA_MASK)
+        # depth = 32 # Bits per pixel
+        # pitch = 4 * WIDTH # Bytes per row
+        # sdl_surface = sdl2.SDL_CreateRGBSurfaceFrom(
+        #     skia_bytes, WIDTH, HEIGHT, depth, pitch,
+        #     self.RED_MASK, self.GREEN_MASK,
+        #     self.BLUE_MASK, self.ALPHA_MASK)
 
-        rect = sdl2.SDL_Rect(0, 0, WIDTH, HEIGHT)
-        window_surface = sdl2.SDL_GetWindowSurface(self.sdl_window)
-        sdl2.SDL_BlitSurface(sdl_surface, rect, window_surface, rect)
-        sdl2.SDL_UpdateWindowSurface(self.sdl_window)
+        # rect = sdl2.SDL_Rect(0, 0, WIDTH, HEIGHT)
+        # window_surface = sdl2.SDL_GetWindowSurface(self.sdl_window)
+        # sdl2.SDL_BlitSurface(sdl_surface, rect, window_surface, rect)
+        # sdl2.SDL_UpdateWindowSurface(self.sdl_window)
+        self.root_surface.flushAndSubmit()
+        sdl2.SDL_GL_SwapWindow(self.sdl_window)
 
     def set_needs_raster_and_draw(self):
         self.needs_raster_and_draw = True

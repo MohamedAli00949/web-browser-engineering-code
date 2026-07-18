@@ -10,18 +10,14 @@ import math
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
+
 class CommitData:
-    def __init__(
-            self,
-            url,
-            scroll,
-            height,
-            display_list
-        ):
+    def __init__(self, url, scroll, height, display_list):
         self.url = url
         self.scroll = scroll
         self.height = height
         self.display_list = display_list
+
 
 class Tab:
     def __init__(self, browser, tab_height):
@@ -56,14 +52,12 @@ class Tab:
         if self.scroll_changed_in_tab:
             scroll = self.scroll
 
-        print("run_animation_frame: ", f"self.url: {self.url}, scroll: {scroll}, self.document.height: {self.document.height}, self.display_list: {self.display_list}")
-        document_height = math.ceil(self.document.height + 2*VSTEP)
-        commit_data = CommitData(
-            self.url,
-            scroll,
-            document_height,
-            self.display_list
+        print(
+            "run_animation_frame: ",
+            f"self.url: {self.url}, scroll: {scroll}, self.document.height: {self.document.height}, self.display_list: {self.display_list}",
         )
+        document_height = math.ceil(self.document.height + 2 * VSTEP)
+        commit_data = CommitData(self.url, scroll, document_height, self.display_list)
         self.display_list = None
         self.browser.commit(self, commit_data)
         self.scroll_changed_in_tab = False
@@ -78,9 +72,13 @@ class Tab:
 
     def raster(self, canvas, offset):
         print("raster: ", f"self.display_list: {self.display_list.pop()}")
-        if self.display_list is None: return
+        if self.display_list is None:
+            return
         for cmd in self.display_list:
-            print("raster: ", f"self.scroll: {self.scroll}, self.tab_height: {self.tab_height}")
+            print(
+                "raster: ",
+                f"self.scroll: {self.scroll}, self.tab_height: {self.tab_height}",
+            )
             if cmd.rect.top() > self.scroll + self.tab_height:
                 continue
             if cmd.rect.bottom() < self.scroll:
@@ -112,17 +110,24 @@ class Tab:
 
         self.nodes = HTMLParser(body).parse()
         print(f"Parsed HTML, nodes: {len(tree_to_list(self.nodes, []))} nodes")
-        
-        if self.js: self.js.discarded = True
+
+        if self.js:
+            self.js.discarded = True
         self.js = JSContext(self)
-        scripts = [node.attributes["src"] for node in tree_to_list(self.nodes, []) if isinstance(node, Element) and node.tag == "script" and "src" in node.attributes]
+        scripts = [
+            node.attributes["src"]
+            for node in tree_to_list(self.nodes, [])
+            if isinstance(node, Element)
+            and node.tag == "script"
+            and "src" in node.attributes
+        ]
         for script in scripts:
             script_url = url.resolve(script)
             if not self.allowed_request(script_url):
                 print("Blocked script load:", script_url)
                 continue
-            
-            try: 
+
+            try:
                 headers, body = script_url.request(self.url, None)
                 self.js.run(script_url, body)
             except dukpy.JSRuntimeError as e:
@@ -131,12 +136,14 @@ class Tab:
 
         self.rules = DEFAULT_STYLE_SHEET.copy()
 
-        links = [node.attributes["href"]
-                    for node in tree_to_list(self.nodes, [])
-                    if isinstance(node, Element)
-                    and node.tag == "link"
-                    and node.attributes.get("rel") == "stylesheet"
-                    and "href" in node.attributes]
+        links = [
+            node.attributes["href"]
+            for node in tree_to_list(self.nodes, [])
+            if isinstance(node, Element)
+            and node.tag == "link"
+            and node.attributes.get("rel") == "stylesheet"
+            and "href" in node.attributes
+        ]
 
         for link in links:
             style_url = url.resolve(link)
@@ -154,7 +161,7 @@ class Tab:
         print("Tab.load: Completed")
 
     def clamp_scroll(self, scroll):
-        height = math.ceil(self.document.height + 2*VSTEP)
+        height = math.ceil(self.document.height + 2 * VSTEP)
         maxscroll = height - self.tab_height
         return max(0, min(scroll, maxscroll))
 
@@ -198,9 +205,15 @@ class Tab:
             elt = elt.parent
 
     def submit_form(self, elt):
-        if self.js.dispatch_event("submit", elt): return
-        inputs = [node for node in tree_to_list(elt, []) 
-                if isinstance(node, Element) and node.tag == "input" and "name" in node.attributes]
+        if self.js.dispatch_event("submit", elt):
+            return
+        inputs = [
+            node
+            for node in tree_to_list(elt, [])
+            if isinstance(node, Element)
+            and node.tag == "input"
+            and "name" in node.attributes
+        ]
 
         body = ""
         for input in inputs:
@@ -221,10 +234,10 @@ class Tab:
             self.load(back)
 
     def render(self):
-        if not self.need_render: return
-        self.browser.measure.time('render')
-        style(self.nodes, sorted(self.rules,
-            key=cascade_priority))
+        if not self.need_render:
+            return
+        self.browser.measure.time("render")
+        style(self.nodes, sorted(self.rules, key=cascade_priority))
         self.document = DocumentLayout(self.nodes)
         self.document.layout()
         self.display_list = []
@@ -236,11 +249,15 @@ class Tab:
             self.scroll_changed_in_tab = True
         self.scroll = clamped_scroll
 
-        self.browser.measure.stop('render')
+        self.browser.measure.stop("render")
+
+        for item in self.display_list:
+            print_tree(item)
 
     def keypress(self, char):
         if self.focus:
-            if self.js.dispatch_event("keydown", self.focus): return
+            if self.js.dispatch_event("keydown", self.focus):
+                return
             if self.focus.tag == "input":
                 self.focus.attributes["value"] = (
                     self.focus.attributes.get("value", "") + char
@@ -250,4 +267,3 @@ class Tab:
 
     def allowed_request(self, url):
         return self.allowed_origins == None or url.origin() in self.allowed_origins
-

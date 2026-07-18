@@ -26,7 +26,7 @@ class CSSParser:
         return self.s[start : self.i]
 
     def literal(self, literal):
-        if not (self.i < len(self.s)) and self.s[self.i] == literal:
+        if not (self.i < len(self.s) and self.s[self.i] == literal):
             raise Exception("Parsing error")
         self.i += 1
 
@@ -158,6 +158,7 @@ def cascade_priority(rule):
     selector, body = rule
     return selector.priority
 
+
 class DocumentLayout:
     def __init__(self, node):
         self.node = node
@@ -215,8 +216,35 @@ class DrawRRect:
     def execute(self, scroll, canvas):
         sk_color = parse_color(self.color)
         moved = self.rect.makeOffset(0, -scroll)
-        rrect = skia.RRect.MakeRectXY(moved, self.rrect.getSimpleRadii().fX, self.rrect.getSimpleRadii().fY)
+        rrect = skia.RRect.MakeRectXY(
+            moved, self.rrect.getSimpleRadii().fX, self.rrect.getSimpleRadii().fY
+        )
         canvas.drawRRect(rrect, skia.Paint(Color=sk_color))
+
+    def __repr__(self):
+        return ("DrawRect(rrect={} color={})").format(
+            str(self.rrect), self.color
+        )
+
+
+class DrawRect:
+    def __init__(self, rect, radius, color):
+        self.rect = rect  # FIX: store rect so tab.draw can call cmd.rect.top()
+        self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
+        self.color = color
+
+    def execute(self, scroll, canvas):
+        sk_color = parse_color(self.color)
+        moved = self.rect.makeOffset(0, -scroll)
+        rrect = skia.RRect.MakeRectXY(
+            moved, self.rrect.getSimpleRadii().fX, self.rrect.getSimpleRadii().fY
+        )
+        canvas.drawRRect(rrect, skia.Paint(Color=sk_color))
+
+    def __repr__(self):
+        return ("DrawRect(rect={} color={})").format(
+            str(self.rect), self.color
+        )
 
 
 class DrawOutline:
@@ -246,7 +274,11 @@ class DrawLine:
         self.thickness = thickness
 
     def execute(self, scroll, canvas):
-        path = skia.Path().moveTo(self.x1, self.y1 - scroll).lineTo(self.x2, self.y2 - scroll)
+        path = (
+            skia.Path()
+            .moveTo(self.x1, self.y1 - scroll)
+            .lineTo(self.x2, self.y2 - scroll)
+        )
 
         paint = skia.Paint(
             Color=parse_color(self.color),
@@ -338,9 +370,7 @@ class InputLayout:
         bgcolor = self.node.style.get("background-color", "transparent")
 
         if bgcolor != "transparent":
-            radius = float(
-                self.node.style.get("border-radius", "0px")[:-2]
-            )
+            radius = float(self.node.style.get("border-radius", "0px")[:-2])
             rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
@@ -362,8 +392,10 @@ class InputLayout:
         return cmds
 
     def self_rect(self):
-        return skia.Rect.MakeLTRB(self.x, self.y, self.x + self.width, self.y + self.height)
-    
+        return skia.Rect.MakeLTRB(
+            self.x, self.y, self.x + self.width, self.y + self.height
+        )
+
     def should_paint(self):
         return True
 
@@ -425,9 +457,7 @@ class Opacity:
             self.rect.join(cmd.rect)
 
     def execute(self, scroll, canvas):
-        paint = skia.Paint(
-            Alphaf=self.opacity
-        )
+        paint = skia.Paint(Alphaf=self.opacity)
 
         if self.opacity < 1:
             canvas.saveLayer(None, paint)
@@ -436,6 +466,7 @@ class Opacity:
         if self.opacity < 1:
             canvas.restore()
 
+
 def parse_blend_mode(blend_mode_str):
     if blend_mode_str == "multiply":
         return skia.BlendMode.kMultiply
@@ -443,11 +474,11 @@ def parse_blend_mode(blend_mode_str):
         return skia.BlendMode.kDifference
     elif blend_mode_str == "destination-in":
         return skia.BlendMode.kDstIn
-    elif blend_mode_str == 'source-over':
+    elif blend_mode_str == "source-over":
         return skia.BlendMode.kSrcOver
     else:
         return skia.BlendMode.kSrcOver
-    
+
 
 class Blend:
     def __init__(self, opacity, blend_mode, children):
@@ -461,16 +492,25 @@ class Blend:
 
     def execute(self, scroll, canvas):
         paint = skia.Paint(
-            Alphaf=self.opacity, 
-            BlendMode=parse_blend_mode(self.blend_mode)
+            Alphaf=self.opacity, BlendMode=parse_blend_mode(self.blend_mode)
         )
         if self.should_save:
             canvas.saveLayer(None, paint)
-        
+
         for cmd in self.children:
             cmd.execute(scroll, canvas)
         if self.should_save:
             canvas.restore()
+
+    def __repr__(self):
+        args = ""
+        if self.opacity < 1:
+            args += ", opacity={}".format(self.opacity)
+        if self.blend_mode:
+            args += ", blend_mode={}".format(self.blend_mode)
+        if not args:
+            args = ", <no-op>"
+        return "Blend({})".format(args[2:])
 
 def paint_visual_effects(node, cmds, rect):
     opacity = float(node.style.get("opacity", "1.0"))
@@ -483,15 +523,11 @@ def paint_visual_effects(node, cmds, rect):
     if node.style.get("overflow", "visible") == "clip":
         border_radius = float(node.style.get("border-radius", "0px")[0:-2])
         cmds.append(
-            Blend(1.0, "destination-in", [
-                    DrawRRect(rect, border_radius, "black")
-                ]
-            )
+            Blend(1.0, "destination-in", [DrawRRect(rect, border_radius, "black")])
         )
 
-    return [
-        Blend(opacity, blend_mode, cmds)
-    ]
+    return [Blend(opacity, blend_mode, cmds)]
+
 
 class BlockLayout:
     def __init__(self, node, parent, previous):
@@ -516,7 +552,9 @@ class BlockLayout:
             child.layout()
 
     def self_rect(self):
-        return skia.Rect.MakeXYWH(self.x, self.y, self.x + self.width, self.y + self.height)
+        return skia.Rect.MakeXYWH(
+            self.x, self.y, self.x + self.width, self.y + self.height
+        )
 
     def paint(self):
         cmds = []
@@ -524,9 +562,7 @@ class BlockLayout:
         bgcolor = self.node.style.get("background-color", "transparent")
 
         if bgcolor != "transparent":
-            radius = float(
-                self.node.style.get("border-radius", "0px")[:-2]
-            )
+            radius = float(self.node.style.get("border-radius", "0px")[:-2])
             rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
