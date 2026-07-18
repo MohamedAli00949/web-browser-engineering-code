@@ -33,9 +33,13 @@ class Tab:
         self.task_runner.start_thread()
 
         self.need_render = False
+        self.needs_style = False
+        self.needs_layout = False
+        self.needs_paint = False
         self.loaded = False
         self.browser = browser
         self.scroll_changed_in_tab = False
+
 
         self.js = None
 
@@ -45,6 +49,13 @@ class Tab:
         self.browser.measure.time("script-runRAFHandlers")
         self.js.interp.evaljs("__runRAFHandlers()")
         self.browser.measure.stop("script-runRAFHandlers")
+
+        for node in tree_to_list(self.document, []):
+            for (property_name, animation) in node.animations.items():
+                value = animation.animate()
+                if value:
+                    node.style[property_name] = value
+                    self.set_needs_layout()
 
         self.render()
 
@@ -86,7 +97,15 @@ class Tab:
             cmd.execute(self.scroll - offset, canvas)
 
     def set_needs_render(self):
-        self.need_render = True
+        self.needs_style = True
+        self.browser.set_needs_animation_frame(self)
+    
+    def set_needs_layout(self):
+        self.needs_layout = True
+        self.browser.set_needs_animation_frame(self)
+
+    def set_needs_paint(self):
+        self.needs_paint = True
         self.browser.set_needs_animation_frame(self)
 
     def load(self, url, payload=None):
@@ -237,12 +256,22 @@ class Tab:
         if not self.need_render:
             return
         self.browser.measure.time("render")
-        style(self.nodes, sorted(self.rules, key=cascade_priority))
-        self.document = DocumentLayout(self.nodes)
-        self.document.layout()
-        self.display_list = []
-        paint_tree(self.document, self.display_list)
-        self.need_render = False
+
+        if self.needs_style:
+            style(self.nodes, sorted(self.rules, key=cascade_priority))
+            self.needs_layout = True
+            self.needs_style = False
+        
+        if self.needs_layout:
+            self.document = DocumentLayout(self.nodes)
+            self.document.layout()
+            self.needs_paint = True
+            self.needs_layout = False
+
+        if self.needs_paint:
+            self.display_list = []
+            paint_tree(self.document, self.display_list)
+            self.needs_paint = False
 
         clamped_scroll = self.clamp_scroll(self.scroll)
         if clamped_scroll != self.scroll:
@@ -251,8 +280,8 @@ class Tab:
 
         self.browser.measure.stop("render")
 
-        for item in self.display_list:
-            print_tree(item)
+        # for item in self.display_list:
+        #     print_tree(item)
 
     def keypress(self, char):
         if self.focus:

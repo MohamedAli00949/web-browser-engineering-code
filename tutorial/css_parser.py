@@ -5,6 +5,32 @@ from html_parser import Text
 from utils import *
 
 
+def parse_transition(value):
+    properties = {}
+    if not value:
+        return properties
+    for item in value.split(","):
+        prop, duration = item.split(" ", 1)
+        frames = int(float(duration[:-1]) / REFRESH_RATE_SEC)
+        properties[prop] = frames
+    return properties
+
+
+def diff_styles(old_style, new_style):
+    transitions = {}
+    for property, num_frames in parse_transition(new_style["transition"]).items():
+        if property not in old_style:
+            continue
+        if property not in new_style:
+            continue
+        old_value = old_style[property]
+        new_value = new_style[property]
+        if old_value == new_value:
+            continue
+        transitions[property] = (old_value, new_value, num_frames)
+    return transitions
+
+
 class CSSParser:
     def __init__(self, s):
         self.s = s
@@ -30,19 +56,25 @@ class CSSParser:
             raise Exception("Parsing error")
         self.i += 1
 
-    def pair(self):
+    def until_chars(self, chars):
+        start = self.i
+        while self.i < len(self.s) and self.s[self.i] not in chars:
+            self.i += 1
+        return self.s[start : self.i]
+
+    def pair(self, until):
         prop = self.word()
         self.whitespace()
         self.literal(":")
         self.whitespace()
-        value = self.word()
-        return prop.casefold(), value
+        value = self.until_chars(until)
+        return prop.casefold(), value.strip()
 
     def body(self):
         pairs = {}
         while self.i < len(self.s) and self.s[self.i] != "}":
             try:
-                prop, value = self.pair()
+                prop, value = self.pair([";", "}"])
                 pairs[prop.casefold()] = value
                 self.whitespace()
                 self.literal(";")
@@ -120,7 +152,8 @@ class DescendantSelector:
         return False
 
 
-def style(node, rules):
+def style(node, rules, tab):
+    old_style = node.style
     node.style = {}
 
     for property, default_value in INHERITED_PROPERTIES.items():
@@ -153,15 +186,42 @@ def style(node, rules):
     for child in node.children:
         style(child, rules)
 
+    if old_style:
+        transitions = diff_styles(old_style, node.style)
+        for property, (old_value, new_value, num_frames) in transitions.items():
+            if property == 'opacity':
+                tab.set_needs_render()
+                animation = NumericAnimation(old_value, new_value, num_frames)
+                node.animations[property] = animation
+                node.style[property] = animation.animate()
+
 
 def cascade_priority(rule):
     selector, body = rule
     return selector.priority
 
+
+class NumericAnimation:
+    def __init__(self, old_value, new_value, num_frames):
+        self.old_value = float(old_value)
+        self.new_value = float(new_value)
+        self.num_frames = num_frames
+
+        self.frame_count = 1
+        total_change = self.new_value - self.old_value
+        self.change_per_frame = total_change / num_frames
+
+    def animate(self):
+        self.frame_count += 1
+        if self.frame_count >= self.num_frames: return
+        current_value = self.old_value + self.change_per_frame * self.frame_count
+        return str(current_value)
+
 class PaintCommand:
     def __init__(self, rect):
         self.rect = rect
         self.children = []
+
 
 class DrawCompositedLayer(PaintCommand):
     def __init__(self, composited_layer):
@@ -176,6 +236,7 @@ class DrawCompositedLayer(PaintCommand):
     def __repr__(self):
         return "DrawCompositedLayer()"
 
+
 class CompositedLayer:
     def __init__(self, skia_context, display_item):
         self.skia_context = skia_context
@@ -186,20 +247,22 @@ class CompositedLayer:
         rect = skia.Rect.MakeEmpty()
         for item in self.display_items:
             rect.join(item.rect)
-        
+
         rect.outset(1, 1)
         return rect
 
     def raster(self):
         bounds = self.composited_bounds()
-        if bounds.isEmpty(): return
+        if bounds.isEmpty():
+            return
         irect = bounds.roundOut()
 
         if not self.surface:
             self.surface = skia.Surface.MakeRenderTarget(
-                self.skia_context, skia.Budgeted.kNo,
-                skia.ImageInfo.MakeN32Premul(
-                    irect.width(), irect.height()))
+                self.skia_context,
+                skia.Budgeted.kNo,
+                skia.ImageInfo.MakeN32Premul(irect.width(), irect.height()),
+            )
             assert self.surface
         canvas = self.surface.getCanvas()
         canvas.clear(skia.ColorTRANSPARENT)
@@ -208,6 +271,7 @@ class CompositedLayer:
         for item in self.display_items:
             item.execute(canvas)
         canvas.restore()
+
 
 class DocumentLayout:
     def __init__(self, node):
@@ -245,11 +309,7 @@ class DrawText(PaintCommand):
         self.right = x1 + font.measureText(text)
         self.color = color
         self.bottom = y1 + linespace(font)
-        super().__init__(skia.Rect.MakeLTRB(
-            x1, y1,
-            self.right,
-            self.bottom
-        ))
+        super().__init__(skia.Rect.MakeLTRB(x1, y1, self.right, self.bottom))
 
         self.rect = skia.Rect.MakeLTRB(x1, y1, self.right, self.bottom)
 
@@ -278,9 +338,7 @@ class DrawRRect(PaintCommand):
         canvas.drawRRect(rrect, skia.Paint(Color=sk_color))
 
     def __repr__(self):
-        return ("DrawRect(rrect={} color={})").format(
-            str(self.rrect), self.color
-        )
+        return ("DrawRect(rrect={} color={})").format(str(self.rrect), self.color)
 
 
 class DrawRect(PaintCommand):
@@ -289,7 +347,6 @@ class DrawRect(PaintCommand):
         super().__init__(rect)
         self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
         self.color = color
-
 
     def execute(self, scroll, canvas):
         sk_color = parse_color(self.color)
@@ -300,9 +357,7 @@ class DrawRect(PaintCommand):
         canvas.drawRRect(rrect, skia.Paint(Color=sk_color))
 
     def __repr__(self):
-        return ("DrawRect(rect={} color={})").format(
-            str(self.rect), self.color
-        )
+        return ("DrawRect(rect={} color={})").format(str(self.rect), self.color)
 
 
 class DrawOutline(PaintCommand):
@@ -320,6 +375,7 @@ class DrawOutline(PaintCommand):
         )
 
         canvas.drawRect(self.rect.makeOffset(0, -scroll), paint)
+
 
 class DrawLine(PaintCommand):
     def __init__(self, x1, y1, x2, y2, color, thickness):
@@ -347,6 +403,7 @@ class DrawLine(PaintCommand):
 
         canvas.drawPath(path, paint)
 
+
 class VisualEffect:
     def __init__(self, rect, children, node=None):
         self.rect = rect.makeOffset(0.0, 0.0)
@@ -354,6 +411,7 @@ class VisualEffect:
         for child in self.children:
             self.rect.join(child.rect)
         self.node = node
+
 
 class TextLayout:
     def __init__(self, node, word, parent, previous):
@@ -584,6 +642,7 @@ class Blend(VisualEffect):
         if not args:
             args = ", <no-op>"
         return "Blend({})".format(args[2:])
+
 
 def paint_visual_effects(node, cmds, rect):
     opacity = float(node.style.get("opacity", "1.0"))
