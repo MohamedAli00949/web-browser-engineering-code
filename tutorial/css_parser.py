@@ -158,6 +158,56 @@ def cascade_priority(rule):
     selector, body = rule
     return selector.priority
 
+class PaintCommand:
+    def __init__(self, rect):
+        self.rect = rect
+        self.children = []
+
+class DrawCompositedLayer(PaintCommand):
+    def __init__(self, composited_layer):
+        self.composited_layer = composited_layer
+        super().__init__(composited_layer.composited_bounds())
+
+    def execute(self, canvas):
+        layer = self.composited_layer
+        bounds = layer.composited_bounds()
+        layer.surface.draw(canvas, bounds.left(), bounds.top())
+
+    def __repr__(self):
+        return "DrawCompositedLayer()"
+
+class CompositedLayer:
+    def __init__(self, skia_context, display_item):
+        self.skia_context = skia_context
+        self.surface = None
+        self.display_items = [display_item]
+
+    def composited_bounds(self):
+        rect = skia.Rect.MakeEmpty()
+        for item in self.display_items:
+            rect.join(item.rect)
+        
+        rect.outset(1, 1)
+        return rect
+
+    def raster(self):
+        bounds = self.composited_bounds()
+        if bounds.isEmpty(): return
+        irect = bounds.roundOut()
+
+        if not self.surface:
+            self.surface = skia.Surface.MakeRenderTarget(
+                self.skia_context, skia.Budgeted.kNo,
+                skia.ImageInfo.MakeN32Premul(
+                    irect.width(), irect.height()))
+            assert self.surface
+        canvas = self.surface.getCanvas()
+        canvas.clear(skia.ColorTRANSPARENT)
+        canvas.save()
+        canvas.translate(-bounds.left(), -bounds.top())
+        for item in self.display_items:
+            item.execute(canvas)
+        canvas.restore()
 
 class DocumentLayout:
     def __init__(self, node):
@@ -186,7 +236,7 @@ class DocumentLayout:
         return cmds
 
 
-class DrawText:
+class DrawText(PaintCommand):
     def __init__(self, x1, y1, text, font, color):
         self.top = y1
         self.left = x1
@@ -195,6 +245,11 @@ class DrawText:
         self.right = x1 + font.measureText(text)
         self.color = color
         self.bottom = y1 + linespace(font)
+        super().__init__(skia.Rect.MakeLTRB(
+            x1, y1,
+            self.right,
+            self.bottom
+        ))
 
         self.rect = skia.Rect.MakeLTRB(x1, y1, self.right, self.bottom)
 
@@ -207,8 +262,9 @@ class DrawText:
         canvas.drawString(self.text, float(self.left), baseline, self.font, paint)
 
 
-class DrawRRect:
+class DrawRRect(PaintCommand):
     def __init__(self, rect, radius, color):
+        super().__init__(rect)
         self.rect = rect  # FIX: store rect so tab.draw can call cmd.rect.top()
         self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
         self.color = color
@@ -227,11 +283,13 @@ class DrawRRect:
         )
 
 
-class DrawRect:
+class DrawRect(PaintCommand):
     def __init__(self, rect, radius, color):
         self.rect = rect  # FIX: store rect so tab.draw can call cmd.rect.top()
+        super().__init__(rect)
         self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
         self.color = color
+
 
     def execute(self, scroll, canvas):
         sk_color = parse_color(self.color)
@@ -247,8 +305,9 @@ class DrawRect:
         )
 
 
-class DrawOutline:
+class DrawOutline(PaintCommand):
     def __init__(self, rect, color, thickness):
+        super().__init__(rect)
         self.rect = rect
         self.color = color
         self.thickness = thickness
@@ -262,9 +321,9 @@ class DrawOutline:
 
         canvas.drawRect(self.rect.makeOffset(0, -scroll), paint)
 
-
-class DrawLine:
+class DrawLine(PaintCommand):
     def __init__(self, x1, y1, x2, y2, color, thickness):
+        super().__init__(skia.Rect.MakeLTRB(x1, y1, x2, y2))
         self.x1 = x1
         self.y1 = y1
         self.x2 = x2
@@ -288,6 +347,13 @@ class DrawLine:
 
         canvas.drawPath(path, paint)
 
+class VisualEffect:
+    def __init__(self, rect, children, node=None):
+        self.rect = rect.makeOffset(0.0, 0.0)
+        self.children = children
+        for child in self.children:
+            self.rect.join(child.rect)
+        self.node = node
 
 class TextLayout:
     def __init__(self, node, word, parent, previous):
@@ -480,8 +546,12 @@ def parse_blend_mode(blend_mode_str):
         return skia.BlendMode.kSrcOver
 
 
-class Blend:
+class Blend(VisualEffect):
     def __init__(self, opacity, blend_mode, children):
+        super().__init__(
+            skia.Rect.MakeEmpty(),
+            children,
+        )
         self.opacity = opacity
         self.blend_mode = blend_mode
         self.should_save = self.blend_mode or self.opacity < 1
@@ -501,6 +571,9 @@ class Blend:
             cmd.execute(scroll, canvas)
         if self.should_save:
             canvas.restore()
+
+    def clone(self, child):
+        return Blend(self.opacity, self.blend_mode, self.node, [child])
 
     def __repr__(self):
         args = ""

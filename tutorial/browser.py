@@ -41,12 +41,20 @@ def mainloop(browser):
             elif event.type == sdl2.SDL_TEXTINPUT:
                 browser.handle_key(event.text.text.decode('utf8'))
 
-        browser.raster_and_draw()
+        browser.composite_raster_and_draw()
         browser.schedule_animation_frame()
+
+
+def add_parent_pointers(nodes, parent=None):
+    for node in nodes:
+        node.parent = parent
+        add_parent_pointers(node.children, node)
 
 class Browser:
     def __init__(self):
         self.chrome = Chrome(self)
+        self.composited_layers = []
+        self.draw_list = []
 
         self.sdl_window = sdl2.SDL_CreateWindow(b"Browser",
             sdl2.SDL_WINDOWPOS_CENTERED,
@@ -59,14 +67,6 @@ class Browser:
             "renderer={}").format(
             OpenGL.GL.glGetString(OpenGL.GL.GL_VENDOR),
             OpenGL.GL.glGetString(OpenGL.GL.GL_RENDERER)))
-        # self.root_surface = skia.Surface.MakeRaster(
-        #     skia.ImageInfo.Make(
-        #         WIDTH, HEIGHT,
-        #         ct=skia.kRGBA_8888_ColorType, 
-        #         at=skia.kUnpremul_AlphaType
-        #     )
-        # )
-        # self.chrome_surface = skia.Surface(WIDTH, math.ceil(self.chrome.bottom))
         self.tab_surface = None
 
         self.tabs = []
@@ -236,20 +236,22 @@ class Browser:
         self.lock.release()
 
     def raster_tab(self):
-        if self.active_tab_height == None:
-            return
+        # if self.active_tab_height == None:
+        #     return
 
-        if not self.tab_surface or self.active_tab_height != self.tab_surface.height():
-            self.tab_surface = skia.Surface.MakeRenderTarget(
-                self.skia_context, skia.Budgeted.kNo,
-                skia.ImageInfo.MakeN32Premul(
-                    WIDTH, self.active_tab_height
-                ))
+        # if not self.tab_surface or self.active_tab_height != self.tab_surface.height():
+        #     self.tab_surface = skia.Surface.MakeRenderTarget(
+        #         self.skia_context, skia.Budgeted.kNo,
+        #         skia.ImageInfo.MakeN32Premul(
+        #             WIDTH, self.active_tab_height
+        #         ))
 
-        canvas = self.tab_surface.getCanvas()
-        canvas.clear(skia.ColorWHITE)
-        for cmd in self.active_tab_display_list:
-            cmd.execute(self.active_tab_scroll, canvas)
+        # canvas = self.tab_surface.getCanvas()
+        # canvas.clear(skia.ColorWHITE)
+        # for cmd in self.active_tab_display_list:
+        #     cmd.execute(self.active_tab_scroll, canvas)
+        for composited_layer in self.composited_layers:
+            composited_layer.raster()
 
     def raster_chrome(self):
         canvas = self.chrome_surface.getCanvas()
@@ -261,13 +263,14 @@ class Browser:
         canvas = self.root_surface.getCanvas()
         canvas.clear(skia.ColorWHITE)
 
-        tab_rect = skia.Rect.MakeLTRB(
-            0, self.chrome.bottom, WIDTH, HEIGHT)
+        # tab_rect = skia.Rect.MakeLTRB(
+        #     0, self.chrome.bottom, WIDTH, HEIGHT)
         tab_offset = self.chrome.bottom - self.active_tab.scroll
         canvas.save()
-        canvas.clipRect(tab_rect)
+        # canvas.clipRect(tab_rect)
         canvas.translate(0, tab_offset)
-        self.tab_surface.draw(canvas, 0, 0)
+        for item in self.draw_list:
+            item.execute(canvas)
         canvas.restore()
 
         chrome_rect = skia.Rect.MakeLTRB(
@@ -297,7 +300,7 @@ class Browser:
     def set_needs_raster_and_draw(self):
         self.needs_raster_and_draw = True
 
-    def raster_and_draw(self):
+    def composite_raster_and_draw(self):
         self.lock.acquire(blocking=True)
         if not self.needs_raster_and_draw:
             self.lock.release()
@@ -356,6 +359,73 @@ class Browser:
 
         # if not new_tab.task_runner_thread.is_alive():
         #     new_tab.task_runner_thread.start()
+
+    def composite(self):
+        add_parent_pointers(self.active_tab_display_list)
+        self.composited_layers = []
+        all_commands = []
+        for cmd in self.active_tab_display_list:
+            all_commands = tree_to_list(cmd, all_commands)
+        paint_commands = [cmd for cmd in all_commands if isinstance(cmd, PaintCommand)]
+        for cmd in paint_commands:
+            layer = CompositedLayer(self.skia_context, cmd)
+            self.composited_layers.append(layer)
+
+    def paint_draw_list(self):
+        new_effects = {}
+        self.draw_list = []
+        for composited_layer in self.composited_layers:
+            current_effect = DrawCompositedLayer(composited_layer)
+            if not composited_layer.display_items: continue
+            parent = composited_layer.display_items[0].parent
+            while parent:
+                if parent in new_effects:
+                    new_parent = new_effects[parent]
+                    new_parent.children.append(current_effect)
+                    break
+                else:
+                    current_effect = parent.clone(current_effect)
+                    new_effects[parent] = current_effect
+                    parent = parent.parent
+            if not parent:
+                self.draw_list.append(current_effect)
+
+    # def composite_raster_and_draw(self):
+    #     # self.lock.acquire(blocking=True)
+    #     # if not self.needs_composite and not self.needs_raster and not self.needs_draw:
+    #     #     self.lock.release()
+    #     #     return
+
+    #     # self.measure.time('composite/raster/draw')
+
+    #     # start_time = time.time()
+    #     # if self.needs_composite:
+    #     #     self.measure.time('composite')
+    #     #     self.composite()
+    #     #     self.measure.stop('composite')
+    #     # if self.needs_raster:
+    #     #     self.measure.time('raster')
+    #     #     self.raster_chrome()
+    #     #     self.raster_tab()
+    #     #     self.measure.stop('raster')
+    #     # if self.needs_draw:
+    #     #     self.measure.time('draw')
+    #     #     self.paint_draw_list()
+    #     #     self.draw()
+    #     #     self.measure.stop('draw')
+
+    #     # self.measure.stop('composite/raster/draw')
+    #     # self.needs_composite = False
+    #     # self.needs_raster = False
+    #     # self.needs_draw = False
+    #     # self.lock.release()
+
+    #     self.composite()
+    #     self.raster_chrome()
+    #     self.raster_tab()
+    #     self.paint_draw_list()
+    #     self.draw()
+
 
 if __name__ == "__main__":
     sdl2.SDL_Init(sdl2.SDL_INIT_EVENTS)
