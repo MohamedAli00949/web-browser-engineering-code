@@ -20,6 +20,7 @@ class JSContext:
     self.interp.export_function("XMLHttpRequest_send", self.XMLHttpRequest_send)
     self.interp.export_function("setTimeout", self.setTimeout)
     self.interp.export_function("requestAnimationFrame", self.requestAnimationFrame)
+    self.interp.export_function("style_set", self.style_set)
     self.tab.browser.measure.time("script-runtime")
     self.interp.evaljs(RUNTIME_JS)
     self.tab.browser.measure.stop("script-runtime")
@@ -37,6 +38,11 @@ class JSContext:
     except dukpy.JSRuntimeError as e:
       self.tab.browser.measure.stop("script-load")
       print("Script: ", script, "crashed: ", e)
+
+  def style_set(self, handle, s):
+    elt = self.handle_to_node[handle]
+    elt.attributes["style"] = s;
+    self.tab.set_needs_render()
 
   def querySelectorAll(self, selector_text):
     selector = CSSParser(selector_text).selector()
