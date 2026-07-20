@@ -272,6 +272,19 @@ class CompositedLayer:
             item.execute(canvas)
         canvas.restore()
 
+        if SHOW_COMPOSITED_LAYER_BORDERS:
+            border_rect = skia.Rect.MakeXYWH(
+                1, 1, irect.width() - 2, irect.height() - 2
+            )
+            DrawOutline(border_rect, "red", 1).execute(canvas)
+
+    def add(self, display_item):
+        self.display_items.append(display_item)
+
+    def can_marge(self, display_item):
+        return display_item.parent == self.display_items[0].parent
+
+
 
 class DocumentLayout:
     def __init__(self, node):
@@ -411,6 +424,9 @@ class VisualEffect:
         for child in self.children:
             self.rect.join(child.rect)
         self.node = node
+        self.needs_compositing = any([
+            child.needs_compositing for child in self.children
+        ])
 
 
 class TextLayout:
@@ -613,6 +629,8 @@ class Blend(VisualEffect):
         self.opacity = opacity
         self.blend_mode = blend_mode
         self.should_save = self.blend_mode or self.opacity < 1
+        if self.should_save:
+            self.needs_compositing = True
         self.children = children
         self.rect = skia.Rect.MakeEmpty()
         for cmd in self.children:
@@ -658,7 +676,9 @@ def paint_visual_effects(node, cmds, rect):
             Blend(1.0, "destination-in", [DrawRRect(rect, border_radius, "black")])
         )
 
-    return [Blend(opacity, blend_mode, cmds)]
+    blend_op = Blend(opacity, blend_mode, cmds)
+    node.blend_op = blend_op
+    return [blend_op]
 
 
 class BlockLayout:

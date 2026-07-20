@@ -21,6 +21,7 @@ from constants import *
 from tasks import *
 from measure_time import *
 
+
 def mainloop(browser):
     event = sdl2.SDL_Event()
     while True:
@@ -39,7 +40,7 @@ def mainloop(browser):
                 elif event.key.keysym.sym == sdl2.SDLK_UP:
                     browser.handle_up()
             elif event.type == sdl2.SDL_TEXTINPUT:
-                browser.handle_key(event.text.text.decode('utf8'))
+                browser.handle_key(event.text.text.decode("utf8"))
 
         browser.composite_raster_and_draw()
         browser.schedule_animation_frame()
@@ -50,23 +51,28 @@ def add_parent_pointers(nodes, parent=None):
         node.parent = parent
         add_parent_pointers(node.children, node)
 
+
 class Browser:
     def __init__(self):
         self.chrome = Chrome(self)
         self.composited_layers = []
         self.draw_list = []
 
-        self.sdl_window = sdl2.SDL_CreateWindow(b"Browser",
+        self.sdl_window = sdl2.SDL_CreateWindow(
+            b"Browser",
             sdl2.SDL_WINDOWPOS_CENTERED,
             sdl2.SDL_WINDOWPOS_CENTERED,
-            WIDTH, HEIGHT,
-            sdl2.SDL_WINDOW_SHOWN | sdl2.SDL_WINDOW_OPENGL)
-        self.gl_context = sdl2.SDL_GL_CreateContext(
-            self.sdl_window)
-        print(("OpenGL initialized: vendor={}," + \
-            "renderer={}").format(
-            OpenGL.GL.glGetString(OpenGL.GL.GL_VENDOR),
-            OpenGL.GL.glGetString(OpenGL.GL.GL_RENDERER)))
+            WIDTH,
+            HEIGHT,
+            sdl2.SDL_WINDOW_SHOWN | sdl2.SDL_WINDOW_OPENGL,
+        )
+        self.gl_context = sdl2.SDL_GL_CreateContext(self.sdl_window)
+        print(
+            ("OpenGL initialized: vendor={}," + "renderer={}").format(
+                OpenGL.GL.glGetString(OpenGL.GL.GL_VENDOR),
+                OpenGL.GL.glGetString(OpenGL.GL.GL_RENDERER),
+            )
+        )
         self.tab_surface = None
 
         self.tabs = []
@@ -81,45 +87,69 @@ class Browser:
         threading.current_thread().name = "Browser Thread"
 
         if sdl2.SDL_BYTEORDER == sdl2.SDL_BIG_ENDIAN:
-            self.RED_MASK = 0xff000000
-            self.GREEN_MASK = 0x00ff0000
-            self.BLUE_MASK = 0x0000ff00
-            self.ALPHA_MASK = 0x000000ff
+            self.RED_MASK = 0xFF000000
+            self.GREEN_MASK = 0x00FF0000
+            self.BLUE_MASK = 0x0000FF00
+            self.ALPHA_MASK = 0x000000FF
         else:
-            self.RED_MASK = 0x000000ff
-            self.GREEN_MASK = 0x0000ff00
-            self.BLUE_MASK = 0x00ff0000
-            self.ALPHA_MASK = 0xff000000
+            self.RED_MASK = 0x000000FF
+            self.GREEN_MASK = 0x0000FF00
+            self.BLUE_MASK = 0x00FF0000
+            self.ALPHA_MASK = 0xFF000000
 
         self.animation_timer = None
 
         self.needs_animation_frame = False
         self.needs_raster_and_draw = False
 
+        self.needs_composite = False
+        self.needs_raster = False
+        self.needs_draw = False
+
         self.active_tab_height = 0
         self.active_tab_display_list = None
+
+        self.composited_updates = {}
 
         self.skia_context = skia.GrDirectContext.MakeGL()
         self.root_surface = skia.Surface.MakeFromBackendRenderTarget(
             self.skia_context,
             skia.GrBackendRenderTarget(
-                WIDTH, HEIGHT,
-                0, 0,
-                skia.GrGLFramebufferInfo(
-                    0, OpenGL.GL.GL_RGBA8
-                )
+                WIDTH, HEIGHT, 0, 0, skia.GrGLFramebufferInfo(0, OpenGL.GL.GL_RGBA8)
             ),
             skia.kBottomLeft_GrSurfaceOrigin,
             skia.kRGBA_8888_ColorType,
-            skia.ColorSpace.MakeSRGB()
+            skia.ColorSpace.MakeSRGB(),
         )
         self.chrome_surface = skia.Surface.MakeRenderTarget(
-            self.skia_context, skia.Budgeted.kNo,
-            skia.ImageInfo.MakeN32Premul(
-                WIDTH, math.ceil(self.chrome.bottom)),
+            self.skia_context,
+            skia.Budgeted.kNo,
+            skia.ImageInfo.MakeN32Premul(WIDTH, math.ceil(self.chrome.bottom)),
         )
         assert self.root_surface is not None
         assert self.chrome_surface is not None
+
+    def set_needs_raster(self):
+        self.needs_raster = True
+        self.needs_draw = True
+
+    def set_needs_composite(self):
+        self.needs_composite = True
+        self.needs_raster = True
+        self.needs_draw = True
+
+    def composite_rater_and_draw(self):
+        if not self.needs_composite and not self.needs_raster and not self.needs_draw:
+            self.lock.release()
+            return
+
+        if self.needs_composite:
+            self.composite()
+        if self.needs_raster:
+            self.raster_chrome()
+            self.raster_tab()
+        if self.needs_draw:
+            self.draw()
 
     def render(self):
         if self.active_tab.loaded:
@@ -136,21 +166,25 @@ class Browser:
             self.active_tab_url = data.url
             if data.scroll is not None:
                 self.active_tab_scroll = data.scroll
-                # self.active_tab.scroll = data.scroll
-            # else:
-            #     self.active_tab_scroll = 0
-            #     self.active_tab.scroll = 0
-
             self.active_tab_height = data.height if data.height is not None else 0
 
             if data.display_list is not None:
                 self.active_tab_display_list = data.display_list
-            # else:
-            #     self.active_tab_display_list = []
-
-            # self.animation_timer = None
-            self.set_needs_raster_and_draw()
+            self.composited_updates = data.composited_updates
+            if self.composited_updates == None:
+                self.composited_updates = {}
+                self.set_needs_composite()
+            else:
+                self.set_needs_draw()
         self.lock.release()
+
+    def get_latest(self, effect):
+        node = effect.node
+        if node not in self.composited_updates:
+            return effect
+        if not isinstance(effect, Blend):
+            return effect
+        return self.composited_updates[node]
 
     def handle_quit(self):
         self.measure.finish()
@@ -170,12 +204,9 @@ class Browser:
         # self.active_tab.task_runner.schedule_task(task)
         # self.draw()
 
-        self.active_tab_scroll = self.clamp_scroll(
-            self.active_tab_scroll - SCROLL_STEP
-        )
+        self.active_tab_scroll = self.clamp_scroll(self.active_tab_scroll - SCROLL_STEP)
 
-
-        self.set_needs_raster_and_draw()
+        self.set_needs_raster()
         self.lock.release()
 
     def handle_down(self):
@@ -185,11 +216,9 @@ class Browser:
             self.lock.release()
             return
 
-        self.active_tab_scroll = self.clamp_scroll(
-            self.active_tab_scroll + SCROLL_STEP
-        )
+        self.active_tab_scroll = self.clamp_scroll(self.active_tab_scroll + SCROLL_STEP)
 
-        self.set_needs_raster_and_draw()
+        self.set_needs_raster()
         self.needs_animation_frame = True
         self.lock.release()
 
@@ -198,12 +227,12 @@ class Browser:
         if e.y < self.chrome.bottom:
             self.focus = None
             self.chrome.click(e.x, e.y)
-            self.set_needs_raster_and_draw()
+            self.set_needs_raster()
         else:
             if self.focus != "content":
                 self.focus = "content"
                 self.chrome.focus = None
-                self.set_needs_raster_and_draw()
+                self.set_needs_raster()
             # url = self.active_tab.url
             self.chrome.blur()
             tab_y = e.y - self.chrome.bottom
@@ -223,8 +252,8 @@ class Browser:
             return
 
         if self.chrome.keypress(char):
-            self.set_needs_raster_and_draw()
-        elif self.focus == 'content':
+            self.set_needs_raster()
+        elif self.focus == "content":
             task = Task(self.active_tab.keypress, char)
             self.active_tab.task_runner.schedule_task(task)
         self.lock.release()
@@ -232,7 +261,7 @@ class Browser:
     def handle_enter(self):
         self.lock.acquire(blocking=True)
         if self.chrome.enter():
-            self.set_needs_raster_and_draw()
+            self.set_needs_raster()
         self.lock.release()
 
     def raster_tab(self):
@@ -273,8 +302,7 @@ class Browser:
             item.execute(canvas)
         canvas.restore()
 
-        chrome_rect = skia.Rect.MakeLTRB(
-            0, 0, WIDTH, self.chrome.bottom)
+        chrome_rect = skia.Rect.MakeLTRB(0, 0, WIDTH, self.chrome.bottom)
         canvas.save()
         canvas.clipRect(chrome_rect)
         self.chrome_surface.draw(canvas, 0, 0)
@@ -305,11 +333,11 @@ class Browser:
         if not self.needs_raster_and_draw:
             self.lock.release()
             return
-        self.measure.time('raster/draw')
+        self.measure.time("raster/draw")
         self.raster_chrome()
         self.raster_tab()
         self.draw()
-        self.measure.stop('raster/draw')
+        self.measure.stop("raster/draw")
         self.needs_raster_and_draw = False
         self.lock.release()
 
@@ -322,6 +350,7 @@ class Browser:
             self.lock.release()
             task = Task(active_tab.run_animation_frame, scroll)
             active_tab.task_runner.schedule_task(task)
+
         self.lock.acquire(blocking=True)
         if self.needs_animation_frame and not self.animation_timer:
             self.animation_timer = threading.Timer(REFRESH_RATE_SEC, callback)
@@ -341,8 +370,7 @@ class Browser:
 
     def set_active_tab(self, tab):
         self.active_tab = tab
-        self.active_tab_scroll = 0
-        self.active_tab_url = None
+        self.clear_data()
         self.needs_animation_frame = True
         self.animation_timer = None
 
@@ -361,13 +389,23 @@ class Browser:
         #     new_tab.task_runner_thread.start()
 
     def composite(self):
-        add_parent_pointers(self.active_tab_display_list)
         self.composited_layers = []
+        add_parent_pointers(self.active_tab_display_list)
         all_commands = []
         for cmd in self.active_tab_display_list:
             all_commands = tree_to_list(cmd, all_commands)
-        paint_commands = [cmd for cmd in all_commands if isinstance(cmd, PaintCommand)]
-        for cmd in paint_commands:
+        non_composited_commands = [cmd 
+            for cmd in all_commands 
+                if isinstance(cmd, PaintCommand) or not cmd.needs_compositing
+                if not cmd.parent or cmd.parent.needs_compositing
+            ]
+        for cmd in non_composited_commands:
+            for layer in reversed(self.composited_layers):
+                if layer.can_marge(cmd):
+                    layer.add(cmd)
+                    break
+                else:
+                    pass
             layer = CompositedLayer(self.skia_context, cmd)
             self.composited_layers.append(layer)
 
@@ -376,19 +414,27 @@ class Browser:
         self.draw_list = []
         for composited_layer in self.composited_layers:
             current_effect = DrawCompositedLayer(composited_layer)
-            if not composited_layer.display_items: continue
+            if not composited_layer.display_items:
+                continue
             parent = composited_layer.display_items[0].parent
             while parent:
-                if parent in new_effects:
-                    new_parent = new_effects[parent]
-                    new_parent.children.append(current_effect)
+                new_parent = self.get_latest(parent)
+                if new_parent in new_effects:
+                    new_effects[parent].children.append(current_effect)
                     break
                 else:
-                    current_effect = parent.clone(current_effect)
-                    new_effects[parent] = current_effect
+                    current_effect = new_parent.clone(current_effect)
+                    new_effects[new_parent] = current_effect
                     parent = parent.parent
             if not parent:
                 self.draw_list.append(current_effect)
+
+    def clear_data(self):
+        self.active_tab_scroll = 0
+        self.active_tab_url = None
+        self.display_list = []
+        self.composited_layers = []
+        self.composited_updates = {}
 
     # def composite_raster_and_draw(self):
     #     # self.lock.acquire(blocking=True)

@@ -12,11 +12,12 @@ DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
 
 class CommitData:
-    def __init__(self, url, scroll, height, display_list):
+    def __init__(self, url, scroll, height, display_list, composited_updates):
         self.url = url
         self.scroll = scroll
         self.height = height
         self.display_list = display_list
+        self.composited_updates = composited_updates
 
 
 class Tab:
@@ -39,7 +40,7 @@ class Tab:
         self.loaded = False
         self.browser = browser
         self.scroll_changed_in_tab = False
-
+        self.composited_updates = []
 
         self.js = None
 
@@ -51,11 +52,14 @@ class Tab:
         self.browser.measure.stop("script-runRAFHandlers")
 
         for node in tree_to_list(self.document, []):
-            for (property_name, animation) in node.animations.items():
+            for property_name, animation in node.animations.items():
                 value = animation.animate()
                 if value:
                     node.style[property_name] = value
-                    self.set_needs_layout()
+                    self.composited_updates.append(node)
+                    self.set_needs_paint()
+
+        need_composite = self.needs_style or self.needs_layout
 
         self.render()
 
@@ -63,15 +67,23 @@ class Tab:
         if self.scroll_changed_in_tab:
             scroll = self.scroll
 
-        print(
-            "run_animation_frame: ",
-            f"self.url: {self.url}, scroll: {scroll}, self.document.height: {self.document.height}, self.display_list: {self.display_list}",
-        )
+        composited_updates = None
+        if not need_composite:
+            composited_updates = {}
+            for node in self.composited_updates:
+                composited_updates[node] = node.blend_op
+        self.composited_updates = []
+
         document_height = math.ceil(self.document.height + 2 * VSTEP)
-        commit_data = CommitData(self.url, scroll, document_height, self.display_list)
+        commit_data = CommitData(
+            self.url, scroll, document_height, 
+            self.display_list, 
+            composited_updates
+        )
         self.display_list = None
-        self.browser.commit(self, commit_data)
         self.scroll_changed_in_tab = False
+
+        self.browser.commit(self, commit_data)
 
     def scrollup(self):
         max_y = max(self.document.height + 2 * VSTEP + self.tab_height, 0)
@@ -99,7 +111,7 @@ class Tab:
     def set_needs_render(self):
         self.needs_style = True
         self.browser.set_needs_animation_frame(self)
-    
+
     def set_needs_layout(self):
         self.needs_layout = True
         self.browser.set_needs_animation_frame(self)
@@ -261,7 +273,7 @@ class Tab:
             style(self.nodes, sorted(self.rules, key=cascade_priority))
             self.needs_layout = True
             self.needs_style = False
-        
+
         if self.needs_layout:
             self.document = DocumentLayout(self.nodes)
             self.document.layout()
