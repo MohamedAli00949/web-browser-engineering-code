@@ -189,7 +189,7 @@ def style(node, rules, tab):
     if old_style:
         transitions = diff_styles(old_style, node.style)
         for property, (old_value, new_value, num_frames) in transitions.items():
-            if property == 'opacity':
+            if property == "opacity":
                 tab.set_needs_render()
                 animation = NumericAnimation(old_value, new_value, num_frames)
                 node.animations[property] = animation
@@ -199,6 +199,26 @@ def style(node, rules, tab):
 def cascade_priority(rule):
     selector, body = rule
     return selector.priority
+
+def map_translation(rect, translation, reversed=False):
+    if not translation:
+        return rect
+    else:
+        (x, y) = translation
+        matrix = skia.Matrix()
+        if reversed:
+            matrix.setTranslate(-x, -y)
+        else:
+            matrix.setTranslate(x, y)
+        return matrix.mapRect(rect)
+
+def absolute_bounds_for_obj(obj):
+    rect = skia.Rect.MakeXYWH(obj.x, obj.y, obj.width, obj.height)
+    cur = obj.node
+    while cur:
+        rect = map_translation(rect, parse_transform(cur.style.get("transform", "")))
+        cur = cur.parent
+    return rect
 
 
 class NumericAnimation:
@@ -213,9 +233,11 @@ class NumericAnimation:
 
     def animate(self):
         self.frame_count += 1
-        if self.frame_count >= self.num_frames: return
+        if self.frame_count >= self.num_frames:
+            return
         current_value = self.old_value + self.change_per_frame * self.frame_count
         return str(current_value)
+
 
 class PaintCommand:
     def __init__(self, rect):
@@ -246,8 +268,8 @@ class CompositedLayer:
     def composited_bounds(self):
         rect = skia.Rect.MakeEmpty()
         for item in self.display_items:
-            rect.join(item.rect)
-
+            rect.join(absolute_to_local(
+                item, local_to_absolute(item, item.rect)))
         rect.outset(1, 1)
         return rect
 
@@ -284,6 +306,11 @@ class CompositedLayer:
     def can_marge(self, display_item):
         return display_item.parent == self.display_items[0].parent
 
+    def absolute_bounds(self):
+        rect = skia.Rect.MakeEmpty()
+        for item in self.display_items:
+            rect.join(local_to_absolute(item, item.rect))
+        return rect
 
 
 class DocumentLayout:
@@ -424,9 +451,9 @@ class VisualEffect:
         for child in self.children:
             self.rect.join(child.rect)
         self.node = node
-        self.needs_compositing = any([
-            child.needs_compositing for child in self.children
-        ])
+        self.needs_compositing = any(
+            [child.needs_compositing for child in self.children]
+        )
 
 
 class TextLayout:
@@ -619,6 +646,21 @@ def parse_blend_mode(blend_mode_str):
     else:
         return skia.BlendMode.kSrcOver
 
+def local_to_absolute(display_item, rect):
+    while display_item.parent:
+        rect = display_item.parent.map(rect)
+        display_item = display_item.parent
+    return rect
+
+
+def absolute_to_local(display_item, rect):
+    parent_chain = []
+    while display_item.parent:
+        parent_chain.append(display_item.parent)
+        display_item = display_item.parent
+    for parent in reversed(parent_chain):
+        rect = parent.unmap(rect)
+    return rect
 
 class Blend(VisualEffect):
     def __init__(self, opacity, blend_mode, children):
@@ -648,6 +690,17 @@ class Blend(VisualEffect):
         if self.should_save:
             canvas.restore()
 
+    def map(self, rect):
+        if self.children and isinstance(self.children[-1], Blend) and self.children[-1].blend_mode == "destination-in":
+            bounds = rect.makeOffset(0.0, 0.0)
+            bounds.intersect(self.children[-1].rect)
+            return bounds
+        else:
+            return rect
+
+    def unmap(self, rect):
+        return rect
+
     def clone(self, child):
         return Blend(self.opacity, self.blend_mode, self.node, [child])
 
@@ -662,9 +715,19 @@ class Blend(VisualEffect):
         return "Blend({})".format(args[2:])
 
 
+def parse_transform(transform_str):
+    if transform_str.find("translate(") < 0:
+        return None
+    left_paren = transform_str.find("(")
+    right_paren = transform_str.find(")")
+    x_px, y_px = transform_str[left_paren + 1 : right_paren].split(", ")
+    return (float(x_px[:-2]), float(y_px[:-2]))
+
+
 def paint_visual_effects(node, cmds, rect):
     opacity = float(node.style.get("opacity", "1.0"))
     blend_mode = node.style.get("mix-blend-mode")
+    translation = parse_transform(node.style.get("transform", ""))
 
     if node.style.get("overflow", "visible") == "clip":
         if not blend_mode:
@@ -678,7 +741,40 @@ def paint_visual_effects(node, cmds, rect):
 
     blend_op = Blend(opacity, blend_mode, cmds)
     node.blend_op = blend_op
-    return [blend_op]
+    return Transform(translation, rect, node, [blend_op])
+
+
+class Transform(VisualEffect):
+    def __init__(self, translation, rect, node, children):
+        super().__init__(rect, children, node)
+        self.self_rect = rect
+        self.translation = translation
+
+    def execute(self, canvas):
+        if self.translation:
+            x, y = self.translation
+            canvas.save()
+            canvas.translate(x, y)
+        for cmd in self.children:
+            cmd.execute(canvas)
+        if self.translation:
+            canvas.restore()
+
+    def map(self, rect):
+        return map_translation(rect, self.translation)
+
+    def unmap(self, rect):
+        return map_translation(rect, self.translation, True)
+
+    def clone(self, child):
+        return Transform(self.translation, self.self_rect, self.node, [child])
+
+    def __repr__(self):
+        if self.translation:
+            x, y = self.translation
+            return "Transform(translate({}, {}))".format(x, y)
+        else:
+            return "Transform(<no-op>)"
 
 
 class BlockLayout:

@@ -11,6 +11,7 @@ import math
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
 
+
 class CommitData:
     def __init__(self, url, scroll, height, display_list, composited_updates):
         self.url = url
@@ -200,11 +201,10 @@ class Tab:
         self.render()
         self.focus = None
         y += self.scroll
-        objs = [
-            obj
-            for obj in tree_to_list(self.document, [])
-            if obj.x <= x < obj.x + obj.width and obj.y <= y < obj.y + obj.height
-        ]
+        loc_rect = skia.Rect.MakeXYWH(x, y, 1, 1)
+        objs = [obj for obj in tree_to_list(self.document, [])
+                if absolute_bounds_for_obj(obj).intersects(
+                    loc_rect)]
 
         if not objs:
             return

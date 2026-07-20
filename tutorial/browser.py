@@ -404,8 +404,10 @@ class Browser:
                 if layer.can_marge(cmd):
                     layer.add(cmd)
                     break
-                else:
-                    pass
+                elif skia.Rect.Intersects(layer.absolute_bounds(), local_to_absolute(cmd, cmd.rect)):
+                    layer = CompositedLayer(self.skia_context, cmd)
+                    self.composited_layers.append(layer)
+                    break
             layer = CompositedLayer(self.skia_context, cmd)
             self.composited_layers.append(layer)
 
