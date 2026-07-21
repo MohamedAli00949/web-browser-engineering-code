@@ -412,7 +412,7 @@ class Browser:
             while parent:
                 new_parent = self.get_latest(parent)
                 if new_parent in new_effects:
-                    new_effects[parent].children.append(current_effect)
+                    new_effects[new_parent].children.append(current_effect)
                     break
                 else:
                     current_effect = new_parent.clone(current_effect)
