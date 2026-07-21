@@ -724,8 +724,8 @@ def parse_transform(transform_str):
         return None
     left_paren = transform_str.find("(")
     right_paren = transform_str.find(")")
-    x_px, y_px = transform_str[left_paren + 1 : right_paren].split(", ")
-    return (float(x_px[:-2]), float(y_px[:-2]))
+    x_px, y_px = transform_str[left_paren + 1 : right_paren].split(",")
+    return (float(x_px.strip()[:-2]), float(y_px.strip()[:-2]))
 
 
 def paint_visual_effects(node, cmds, rect):

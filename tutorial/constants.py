@@ -57,9 +57,17 @@ NAMED_COLORS = {
     "black": "#000000",
     "white": "#ffffff",
     "red": "#ff0000",
+    "green": "#008000",
+    "lightgreen": "#90ee90",
     "lightblue": "#add8e6",
+    "blue": "#0000ff",
+    "yellow": "#ffff00",
     "orange": "#ffa500",
+    "purple": "#800080",
     "gray": "#808080",
+    "grey": "#808080",
+    "pink": "#ffc0cb",
+    "brown": "#a52a2a",
     "transparent": None,
 }
 
