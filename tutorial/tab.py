@@ -11,7 +11,6 @@ import math
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
 
-
 class CommitData:
     def __init__(self, url, scroll, height, display_list, composited_updates):
         self.url = url
@@ -52,7 +51,7 @@ class Tab:
         self.js.interp.evaljs("__runRAFHandlers()")
         self.browser.measure.stop("script-runRAFHandlers")
 
-        for node in tree_to_list(self.document, []):
+        for node in tree_to_list(self.nodes, []):
             for property_name, animation in node.animations.items():
                 value = animation.animate()
                 if value:
@@ -77,9 +76,7 @@ class Tab:
 
         document_height = math.ceil(self.document.height + 2 * VSTEP)
         commit_data = CommitData(
-            self.url, scroll, document_height, 
-            self.display_list, 
-            composited_updates
+            self.url, scroll, document_height, self.display_list, composited_updates
         )
         self.display_list = None
         self.scroll_changed_in_tab = False
@@ -107,7 +104,7 @@ class Tab:
                 continue
             if cmd.rect.bottom() < self.scroll:
                 continue
-            cmd.execute(self.scroll - offset, canvas)
+            cmd.execute(canvas)
 
     def set_needs_render(self):
         self.needs_style = True
@@ -202,9 +199,11 @@ class Tab:
         self.focus = None
         y += self.scroll
         loc_rect = skia.Rect.MakeXYWH(x, y, 1, 1)
-        objs = [obj for obj in tree_to_list(self.document, [])
-                if absolute_bounds_for_obj(obj).intersects(
-                    loc_rect)]
+        objs = [
+            obj
+            for obj in tree_to_list(self.document, [])
+            if absolute_bounds_for_obj(obj).intersects(loc_rect)
+        ]
 
         if not objs:
             return
@@ -265,12 +264,10 @@ class Tab:
             self.load(back)
 
     def render(self):
-        if not self.need_render:
-            return
         self.browser.measure.time("render")
 
         if self.needs_style:
-            style(self.nodes, sorted(self.rules, key=cascade_priority))
+            style(self.nodes, sorted(self.rules, key=cascade_priority), self)
             self.needs_layout = True
             self.needs_style = False
 

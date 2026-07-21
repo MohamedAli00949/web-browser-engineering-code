@@ -138,18 +138,35 @@ class Browser:
         self.needs_raster = True
         self.needs_draw = True
 
-    def composite_rater_and_draw(self):
-        if not self.needs_composite and not self.needs_raster and not self.needs_draw:
+    def composite_raster_and_draw(self):
+        self.lock.acquire(blocking=True)
+        if not self.needs_composite and \
+            not self.needs_raster and \
+            not self.needs_draw:
             self.lock.release()
             return
 
+        self.measure.time('composite_raster_and_draw')
+        start_time = time.time()
         if self.needs_composite:
+            self.measure.time('composite')
             self.composite()
+            self.measure.stop('composite')
         if self.needs_raster:
+            self.measure.time('raster')
             self.raster_chrome()
             self.raster_tab()
+            self.measure.stop('raster')
         if self.needs_draw:
+            self.measure.time('draw')
+            self.paint_draw_list()
             self.draw()
+            self.measure.stop('draw')
+        self.measure.stop('composite_raster_and_draw')
+        self.needs_composite = False
+        self.needs_raster = False
+        self.needs_draw = False
+        self.lock.release()
 
     def render(self):
         if self.active_tab.loaded:
@@ -164,12 +181,12 @@ class Browser:
         self.lock.acquire(blocking=True)
         if tab == self.active_tab:
             self.active_tab_url = data.url
-            if data.scroll is not None:
+            if data.scroll != None:
                 self.active_tab_scroll = data.scroll
-            self.active_tab_height = data.height if data.height is not None else 0
-
-            if data.display_list is not None:
+            self.active_tab_height = data.height
+            if data.display_list:
                 self.active_tab_display_list = data.display_list
+            self.animation_timer = None
             self.composited_updates = data.composited_updates
             if self.composited_updates == None:
                 self.composited_updates = {}
@@ -177,6 +194,9 @@ class Browser:
             else:
                 self.set_needs_draw()
         self.lock.release()
+
+    def set_needs_draw(self):
+        self.needs_draw = True
 
     def get_latest(self, effect):
         node = effect.node
@@ -200,13 +220,10 @@ class Browser:
             self.lock.release()
             return
 
-        # task = Task(self.active_tab.scrollup)
-        # self.active_tab.task_runner.schedule_task(task)
-        # self.draw()
-
         self.active_tab_scroll = self.clamp_scroll(self.active_tab_scroll - SCROLL_STEP)
 
         self.set_needs_raster()
+        self.needs_animation_frame = True
         self.lock.release()
 
     def handle_down(self):
@@ -265,20 +282,6 @@ class Browser:
         self.lock.release()
 
     def raster_tab(self):
-        # if self.active_tab_height == None:
-        #     return
-
-        # if not self.tab_surface or self.active_tab_height != self.tab_surface.height():
-        #     self.tab_surface = skia.Surface.MakeRenderTarget(
-        #         self.skia_context, skia.Budgeted.kNo,
-        #         skia.ImageInfo.MakeN32Premul(
-        #             WIDTH, self.active_tab_height
-        #         ))
-
-        # canvas = self.tab_surface.getCanvas()
-        # canvas.clear(skia.ColorWHITE)
-        # for cmd in self.active_tab_display_list:
-        #     cmd.execute(self.active_tab_scroll, canvas)
         for composited_layer in self.composited_layers:
             composited_layer.raster()
 
@@ -286,7 +289,7 @@ class Browser:
         canvas = self.chrome_surface.getCanvas()
         canvas.clear(skia.ColorWHITE)
         for cmd in self.chrome.paint():
-            cmd.execute(0, canvas)
+            cmd.execute(canvas)
 
     def draw(self):
         canvas = self.root_surface.getCanvas()
@@ -327,19 +330,6 @@ class Browser:
 
     def set_needs_raster_and_draw(self):
         self.needs_raster_and_draw = True
-
-    def composite_raster_and_draw(self):
-        self.lock.acquire(blocking=True)
-        if not self.needs_raster_and_draw:
-            self.lock.release()
-            return
-        self.measure.time("raster/draw")
-        self.raster_chrome()
-        self.raster_tab()
-        self.draw()
-        self.measure.stop("raster/draw")
-        self.needs_raster_and_draw = False
-        self.lock.release()
 
     def schedule_animation_frame(self):
         def callback():
@@ -437,43 +427,6 @@ class Browser:
         self.display_list = []
         self.composited_layers = []
         self.composited_updates = {}
-
-    # def composite_raster_and_draw(self):
-    #     # self.lock.acquire(blocking=True)
-    #     # if not self.needs_composite and not self.needs_raster and not self.needs_draw:
-    #     #     self.lock.release()
-    #     #     return
-
-    #     # self.measure.time('composite/raster/draw')
-
-    #     # start_time = time.time()
-    #     # if self.needs_composite:
-    #     #     self.measure.time('composite')
-    #     #     self.composite()
-    #     #     self.measure.stop('composite')
-    #     # if self.needs_raster:
-    #     #     self.measure.time('raster')
-    #     #     self.raster_chrome()
-    #     #     self.raster_tab()
-    #     #     self.measure.stop('raster')
-    #     # if self.needs_draw:
-    #     #     self.measure.time('draw')
-    #     #     self.paint_draw_list()
-    #     #     self.draw()
-    #     #     self.measure.stop('draw')
-
-    #     # self.measure.stop('composite/raster/draw')
-    #     # self.needs_composite = False
-    #     # self.needs_raster = False
-    #     # self.needs_draw = False
-    #     # self.lock.release()
-
-    #     self.composite()
-    #     self.raster_chrome()
-    #     self.raster_tab()
-    #     self.paint_draw_list()
-    #     self.draw()
-
 
 if __name__ == "__main__":
     sdl2.SDL_Init(sdl2.SDL_INIT_EVENTS)
