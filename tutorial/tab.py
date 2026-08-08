@@ -43,6 +43,7 @@ class Tab:
         self.composited_updates = []
 
         self.js = None
+        self.zoom = 1.0
 
     def run_animation_frame(self, scroll):
         if not self.scroll_changed_in_tab:
@@ -121,6 +122,7 @@ class Tab:
     def load(self, url, payload=None):
         print(f"Tab.load: Starting load for {url}")
         self.loaded = False
+        self.zoom = 1
         self.scroll = 0
         self.scroll_changed_in_tab = True
         self.task_runner.clear_pending_tasks()
@@ -273,7 +275,7 @@ class Tab:
 
         if self.needs_layout:
             self.document = DocumentLayout(self.nodes)
-            self.document.layout()
+            self.document.layout(self.zoom)
             self.needs_paint = True
             self.needs_layout = False
 
@@ -305,3 +307,19 @@ class Tab:
 
     def allowed_request(self, url):
         return self.allowed_origins == None or url.origin() in self.allowed_origins
+    
+    def zoom_by(self, increment): 
+        if increment:
+            self.zoom *= 1.1
+            self.scroll *= 1.1
+        else:
+            self.zoom *= 1/1.1
+            self.scroll *= 1/1.1
+        self.scroll_changed_in_tab = True
+        self.set_needs_render()
+
+    def reset_zoom(self):
+        self.scroll /= self.zoom
+        self.zoom = 1
+        self.scroll_changed_in_tab = True
+        self.set_needs_render()

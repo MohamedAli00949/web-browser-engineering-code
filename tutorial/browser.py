@@ -24,6 +24,7 @@ from measure_time import *
 
 def mainloop(browser):
     event = sdl2.SDL_Event()
+    ctrl_down = False
     while True:
         while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
             if event.type == sdl2.SDL_QUIT:
@@ -33,12 +34,27 @@ def mainloop(browser):
             elif event.type == sdl2.SDL_MOUSEBUTTONUP:
                 browser.handle_click(event.button)
             elif event.type == sdl2.SDL_KEYDOWN:
+                print("key down", event.key.keysym.sym)
                 if event.key.keysym.sym == sdl2.SDLK_RETURN:
                     browser.handle_enter()
                 elif event.key.keysym.sym == sdl2.SDLK_DOWN:
                     browser.handle_down()
                 elif event.key.keysym.sym == sdl2.SDLK_UP:
                     browser.handle_up()
+                elif event.key.keysym.sym == sdl2.SDLK_RCTRL or event.key.keysym.sym == sdl2.SDLK_LCTRL:
+                    ctrl_down = True
+
+                if ctrl_down:
+                    if event.key.keysym.sym == sdl2.SDLK_EQUALS:
+                        browser.increment_zoom(True)
+                    elif event.key.keysym.sym == sdl2.SDLK_MINUS:
+                        browser.increment_zoom(False)
+                    elif event.key.keysym.sym == sdl2.SDLK_0:
+                        browser.reset_zoom()
+            elif event.type == sdl2.SDL_KEYUP:
+                print("key up", event.key.keysym.sym, ctrl_down)
+                if event.key.keysym.sym == sdl2.SDLK_RCTRL or event.key.keysym.sym == sdl2.SDLK_LCTRL:
+                    ctrl_down = False
             elif event.type == sdl2.SDL_TEXTINPUT:
                 browser.handle_key(event.text.text.decode("utf8"))
 
@@ -129,6 +145,14 @@ class Browser:
         assert self.root_surface is not None
         assert self.chrome_surface is not None
 
+    def increment_zoom(self, increment):
+        task = Task(self.active_tab.zoom_by, increment)
+        self.active_tab.task_runner.schedule_task(task)
+
+    def reset_zoom(self):
+        task = Task(self.active_tab.reset_zoom)
+        self.active_tab.task_runner.schedule_task(task)
+
     def set_needs_raster(self):
         self.needs_raster = True
         self.needs_draw = True
@@ -140,29 +164,27 @@ class Browser:
 
     def composite_raster_and_draw(self):
         self.lock.acquire(blocking=True)
-        if not self.needs_composite and \
-            not self.needs_raster and \
-            not self.needs_draw:
+        if not self.needs_composite and not self.needs_raster and not self.needs_draw:
             self.lock.release()
             return
 
-        self.measure.time('composite_raster_and_draw')
+        self.measure.time("composite_raster_and_draw")
         start_time = time.time()
         if self.needs_composite:
-            self.measure.time('composite')
+            self.measure.time("composite")
             self.composite()
-            self.measure.stop('composite')
+            self.measure.stop("composite")
         if self.needs_raster:
-            self.measure.time('raster')
+            self.measure.time("raster")
             self.raster_chrome()
             self.raster_tab()
-            self.measure.stop('raster')
+            self.measure.stop("raster")
         if self.needs_draw:
-            self.measure.time('draw')
+            self.measure.time("draw")
             self.paint_draw_list()
             self.draw()
-            self.measure.stop('draw')
-        self.measure.stop('composite_raster_and_draw')
+            self.measure.stop("draw")
+        self.measure.stop("composite_raster_and_draw")
         self.needs_composite = False
         self.needs_raster = False
         self.needs_draw = False
@@ -250,15 +272,10 @@ class Browser:
                 self.focus = "content"
                 self.chrome.focus = None
                 self.set_needs_raster()
-            # url = self.active_tab.url
             self.chrome.blur()
             tab_y = e.y - self.chrome.bottom
             task = Task(self.active_tab.click, e.x, tab_y)
             self.active_tab.task_runner.schedule_task(task)
-        #     if self.active_tab.url != url:
-        #         self.raster_chrome()
-        #     self.raster_tab()
-        # self.draw()
         self.lock.release()
 
     def handle_key(self, char):
@@ -384,17 +401,20 @@ class Browser:
         all_commands = []
         for cmd in self.active_tab_display_list:
             all_commands = tree_to_list(cmd, all_commands)
-        non_composited_commands = [cmd 
-            for cmd in all_commands 
-                if isinstance(cmd, PaintCommand) or not cmd.needs_compositing
-                if not cmd.parent or cmd.parent.needs_compositing
-            ]
+        non_composited_commands = [
+            cmd
+            for cmd in all_commands
+            if isinstance(cmd, PaintCommand) or not cmd.needs_compositing
+            if not cmd.parent or cmd.parent.needs_compositing
+        ]
         for cmd in non_composited_commands:
             for layer in reversed(self.composited_layers):
                 if layer.can_marge(cmd):
                     layer.add(cmd)
                     break
-                elif skia.Rect.Intersects(layer.absolute_bounds(), local_to_absolute(cmd, cmd.rect)):
+                elif skia.Rect.Intersects(
+                    layer.absolute_bounds(), local_to_absolute(cmd, cmd.rect)
+                ):
                     layer = CompositedLayer(self.skia_context, cmd)
                     self.composited_layers.append(layer)
                     break
@@ -427,6 +447,7 @@ class Browser:
         self.display_list = []
         self.composited_layers = []
         self.composited_updates = {}
+
 
 if __name__ == "__main__":
     sdl2.SDL_Init(sdl2.SDL_INIT_EVENTS)

@@ -4,40 +4,41 @@ import random
 import html
 
 s = socket.socket(
-    family=socket.AF_INET,
-    type=socket.SOCK_STREAM,
-    proto=socket.IPPROTO_TCP)
+    family=socket.AF_INET, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP
+)
 
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-s.bind(('', 8000))
+s.bind(("", 8000))
 s.listen()
 
 SESSIONS = {}
 
+
 def handle_connection(conx):
     req = conx.makefile("b")
-    reqline = req.readline().decode('utf8')
+    reqline = req.readline().decode("utf8")
     method, url, version = reqline.split(" ", 2)
     assert method in ["GET", "POST"]
 
     headers = {}
     while True:
-        line = req.readline().decode('utf8')
-        if line == '\r\n': break
+        line = req.readline().decode("utf8")
+        if line == "\r\n":
+            break
         header, value = line.split(":", 1)
         headers[header.casefold()] = value.strip()
 
-    if 'cookie' in headers:
-        token = headers['cookie'][len("token="):]
+    if "cookie" in headers:
+        token = headers["cookie"][len("token=") :]
     else:
         token = str(random.random())[2:]
 
     session = SESSIONS.setdefault(token, {})
 
-    if 'content-length' in headers:
-        length = int(headers['content-length'])
-        body = req.read(length).decode('utf8')
+    if "content-length" in headers:
+        length = int(headers["content-length"])
+        body = req.read(length).decode("utf8")
     else:
         body = None
 
@@ -46,25 +47,24 @@ def handle_connection(conx):
     response = "HTTP/1.0 {}\r\n".format(status)
     response += "Content-Length: {}\r\n".format(len(body.encode("utf8")))
 
-    if 'cookie' not in headers:
+    if "cookie" not in headers:
         response += "Set-Cookie: token={}; SameSite=Lax\r\n".format(token)
 
     csp = "default-src http://localhost:8000"
     response += "Content-Security-Policy: {}\r\n".format(csp)
 
     response += "\r\n" + body
-    conx.send(response.encode('utf8'))
+    conx.send(response.encode("utf8"))
     conx.close()
+
 
 ENTRIES = [
     ("No names. We are nameless!", "cerealkiller"),
     ("HACK THE PLANET!!!", "crashoverride"),
 ]
 
-LOGINS = {
-    "crashoverride": "0cool",
-    "cerealkiller": "emmanuel"
-}
+LOGINS = {"crashoverride": "0cool", "cerealkiller": "emmanuel"}
+
 
 def do_request(session, method, url, headers, body):
     out = "<!doctype html>"
@@ -99,8 +99,21 @@ def do_request(session, method, url, headers, body):
             return "404 Not Found", not_found(url, method)
     elif method == "GET" and url == "/count":
         return "200 OK", show_count(session, out)
+    elif method == "GET" and url == "/lorem":
+        return "200 OK", lorem_ipsum()
     else:
         return "404 Not Found", not_found(url, method, out)
+
+def lorem_ipsum():
+    return """
+    Lorem ipsum dolor sit amet,consectetur adipiscing elit, sed do eiusmod tempor
+incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis
+nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore
+eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt
+in culpa qui officia deserunt mollit anim id est laborum.
+"""
+
 
 def show_count(session, out):
     out = "<!doctype html>"
@@ -111,6 +124,7 @@ def show_count(session, out):
     out += "<script src=/eventloop.js></script>"
 
     return out
+
 
 def show_comments(session, out):
     # ...
@@ -138,6 +152,7 @@ def show_comments(session, out):
     # ...
     return out
 
+
 def form_decode(body):
     params = {}
     for field in body.split("&"):
@@ -147,27 +162,34 @@ def form_decode(body):
         params[name] = value
     return params
 
+
 def add_entry(session, params, out):
-    if "user" not in session: return
-    if "nonce" not in session or "nonce" not in params: return
-    if session["nonce"] != params["nonce"]: return
-    if 'guest' in params and len(params['guest']) <= 100:
-        ENTRIES.append((params['guest'], session['user']))
+    if "user" not in session:
+        return
+    if "nonce" not in session or "nonce" not in params:
+        return
+    if session["nonce"] != params["nonce"]:
+        return
+    if "guest" in params and len(params["guest"]) <= 100:
+        ENTRIES.append((params["guest"], session["user"]))
     return show_comments(session, out)
+
 
 def not_found(url, method, out):
     out = "<!doctype html>"
     out += "<h1>{} {} not found!</h1>".format(method, url)
     return out
 
+
 def login_form(session):
     out = "<!doctype html>"
     out += "<form action=/login method=post>"
-    out +=   "<p>Username: <input name=username></p>"
-    out +=   "<p>Password: <input name=password type=password></p>"
-    out +=   "<p><button>Log in</button></p>"
+    out += "<p>Username: <input name=username></p>"
+    out += "<p>Password: <input name=password type=password></p>"
+    out += "<p><button>Log in</button></p>"
     out += "</form>"
     return out
+
 
 def do_login(session, params):
     username = params.get("username")
@@ -179,6 +201,7 @@ def do_login(session, params):
         out = "<!doctype html>"
         out += "<h1>Invalid password for {}</h1>".format(username)
         return "401 Unauthorized", out
+
 
 while True:
     conx, addr = s.accept()
