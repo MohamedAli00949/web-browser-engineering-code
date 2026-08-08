@@ -52,28 +52,32 @@ class Chrome:
         )
 
     def paint(self):
-        cmds = []
-        cmds.append(DrawLine(0, self.bottom, WIDTH, self.bottom, "black", 1))
+        if self.browser.dark_mode:
+            color = "white"
+        else:
+            color = "black"
 
-        cmds.append(DrawOutline(self.newtab_rect, "black", 1))
-        cmds.append(DrawRRect(skia.Rect.MakeLTRB(0, 0, WIDTH, self.bottom), 0, "white"))
+        cmds = []
+        cmds.append(DrawLine(0, self.bottom, WIDTH, self.bottom, color, 1))
+
+        cmds.append(DrawOutline(self.newtab_rect, color, 1))
         cmds.append(
             DrawText(
                 self.newtab_rect.left() + self.padding,
                 self.newtab_rect.top(),
                 "+",
                 self.font,
-                "black",
+                color,
             )
         )
 
         for i, tab in enumerate(self.browser.tabs):
             bounds = self.tab_rect(i)
             cmds.append(
-                DrawLine(bounds.left(), 0, bounds.left(), bounds.bottom(), "black", 1)
+                DrawLine(bounds.left(), 0, bounds.left(), bounds.bottom(), color, 1)
             )
             cmds.append(
-                DrawLine(bounds.right(), 0, bounds.right(), bounds.bottom(), "black", 1)
+                DrawLine(bounds.right(), 0, bounds.right(), bounds.bottom(), color, 1)
             )
             cmds.append(
                 DrawText(
@@ -81,31 +85,31 @@ class Chrome:
                     bounds.top() + self.padding,
                     "Tab {}".format(i),
                     self.font,
-                    "black",
+                    color,
                 )
             )
             if tab == self.browser.active_tab:
                 cmds.append(
-                    DrawLine(0, bounds.bottom(), bounds.left(), bounds.bottom(), "black", 1)
+                    DrawLine(0, bounds.bottom(), bounds.left(), bounds.bottom(), color, 1)
                 )
                 cmds.append(
                     DrawLine(
-                        bounds.right(), bounds.bottom(), WIDTH, bounds.bottom(), "black", 1
+                        bounds.right(), bounds.bottom(), WIDTH, bounds.bottom(), color, 1
                     )
                 )
 
-        cmds.append(DrawOutline(self.back_rect, "black", 1))
+        cmds.append(DrawOutline(self.back_rect, color, 1))
         cmds.append(
             DrawText(
                 self.back_rect.left() + self.padding,
                 self.back_rect.top(),
                 "<",
                 self.font,
-                "black",
+                color,
             )
         )
 
-        cmds.append(DrawOutline(self.address_rect, "black", 1))
+        cmds.append(DrawOutline(self.address_rect, color, 1))
 
         if self.focus == "address_bar":
             cmds.append(
@@ -114,7 +118,7 @@ class Chrome:
                     self.address_rect.top(),
                     self.address_bar,
                     self.font,
-                    "black",
+                    color,
                 )
             )
             w = self.font.measureText(self.address_bar)
@@ -132,7 +136,7 @@ class Chrome:
                     self.address_rect.top(),
                     url,
                     self.font,
-                    "black",
+                    color,
                 )
             )
 

@@ -101,22 +101,47 @@ class CSSParser:
             out = DescendantSelector(out, descendant)
             self.whitespace()
         return out
+    
+    def media_query(self):
+        self.literal("@")
+        assert self.word() == "media"
+        self.whitespace()
+        self.literal("(")
+        self.whitespace()
+        prop, val = self.pair([")"])
+        self.whitespace()
+        self.literal(")")
+        return prop, val
 
     def parse(self):
         rules = []
+        media = None
+        self.whitespace()
         while self.i < len(self.s):
             try:
-                self.whitespace()
-                selector = self.selector()
-                self.literal("{")
-                self.whitespace()
-                body = self.body()
-                self.literal("}")
-                rules.append((selector, body))
+                if self.s[self.i] == "@" and not media:
+                    prop, val = self.media_query()
+                    if prop == "prefers-color-scheme" and val in ["dark", "light"]:
+                        media = val
+                    self.whitespace()
+                    self.literal("{")
+                    self.whitespace()
+                elif self.s[self.i] == "}" and media:
+                    self.literal("}")
+                    media = None
+                    self.whitespace()
+                else:
+                    selector = self.selector()
+                    self.literal("{")
+                    self.whitespace()
+                    body = self.body()
+                    self.literal("}")
+                    self.whitespace()
+                    rules.append((media, selector, body))
             except Exception:
                 why = self.ignore_until(["}"])
-                if why == ";":
-                    self.literal(";")
+                if why == "}":
+                    self.literal("}")
                     self.whitespace()
                 else:
                     break
@@ -158,7 +183,10 @@ def style(node, rules, tab):
         else:
             node.style[property] = default_value
 
-    for selector, body in rules:
+    for media, selector, body in rules:
+        if media:
+            if (media == "dark") != tab.dark_mode:
+                continue
         if not selector.matches(node):
             continue
         for property, value in body.items():
@@ -193,7 +221,7 @@ def style(node, rules, tab):
 
 
 def cascade_priority(rule):
-    selector, body = rule
+    media, selector, body = rule
     return selector.priority
 
 

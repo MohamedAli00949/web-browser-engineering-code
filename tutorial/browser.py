@@ -51,6 +51,8 @@ def mainloop(browser):
                         browser.increment_zoom(False)
                     elif event.key.keysym.sym == sdl2.SDLK_0:
                         browser.reset_zoom()
+                    elif event.key.keysym.sym == sdl2.SDLK_d:
+                        browser.toggle_dark_mode()
             elif event.type == sdl2.SDL_KEYUP:
                 print("key up", event.key.keysym.sym, ctrl_down)
                 if event.key.keysym.sym == sdl2.SDLK_RCTRL or event.key.keysym.sym == sdl2.SDLK_LCTRL:
@@ -144,6 +146,13 @@ class Browser:
         )
         assert self.root_surface is not None
         assert self.chrome_surface is not None
+
+        self.dark_mode = False
+
+    def toggle_dark_mode(self):
+        self.dark_mode = not self.dark_mode
+        task = Task(self.active_tab.set_dark_mode, self.dark_mode)
+        self.active_tab.task_runner.schedule_task(task)
 
     def increment_zoom(self, increment):
         task = Task(self.active_tab.zoom_by, increment)
@@ -303,14 +312,21 @@ class Browser:
             composited_layer.raster()
 
     def raster_chrome(self):
+        if self.dark_mode:
+            background_color = skia.ColorBLACK
+        else:
+            background_color = skia.ColorWHITE
         canvas = self.chrome_surface.getCanvas()
-        canvas.clear(skia.ColorWHITE)
+        canvas.clear(background_color)
         for cmd in self.chrome.paint():
             cmd.execute(canvas)
 
     def draw(self):
         canvas = self.root_surface.getCanvas()
-        canvas.clear(skia.ColorWHITE)
+        if self.dark_mode:
+            canvas.clear(skia.ColorBLACK)
+        else:
+            canvas.clear(skia.ColorWHITE)
 
         # tab_rect = skia.Rect.MakeLTRB(
         #     0, self.chrome.bottom, WIDTH, HEIGHT)
@@ -327,21 +343,6 @@ class Browser:
         canvas.clipRect(chrome_rect)
         self.chrome_surface.draw(canvas, 0, 0)
         canvas.restore()
-
-        # skia_image = self.root_surface.makeImageSnapshot()
-        # skia_bytes = skia_image.tobytes()
-
-        # depth = 32 # Bits per pixel
-        # pitch = 4 * WIDTH # Bytes per row
-        # sdl_surface = sdl2.SDL_CreateRGBSurfaceFrom(
-        #     skia_bytes, WIDTH, HEIGHT, depth, pitch,
-        #     self.RED_MASK, self.GREEN_MASK,
-        #     self.BLUE_MASK, self.ALPHA_MASK)
-
-        # rect = sdl2.SDL_Rect(0, 0, WIDTH, HEIGHT)
-        # window_surface = sdl2.SDL_GetWindowSurface(self.sdl_window)
-        # sdl2.SDL_BlitSurface(sdl_surface, rect, window_surface, rect)
-        # sdl2.SDL_UpdateWindowSurface(self.sdl_window)
         self.root_surface.flushAndSubmit()
         sdl2.SDL_GL_SwapWindow(self.sdl_window)
 
@@ -380,6 +381,8 @@ class Browser:
         self.clear_data()
         self.needs_animation_frame = True
         self.animation_timer = None
+        task = Task(self.active_tab.set_dark_mode, self.dark_mode)
+        self.active_tab.task_runner.schedule_task(task)
 
     def new_tab(self, url):
         self.lock.acquire(blocking=True)
@@ -391,9 +394,6 @@ class Browser:
         self.tabs.append(new_tab)
         self.set_active_tab(new_tab)
         self.schedule_load(url)
-
-        # if not new_tab.task_runner_thread.is_alive():
-        #     new_tab.task_runner_thread.start()
 
     def composite(self):
         self.composited_layers = []

@@ -44,6 +44,7 @@ class Tab:
 
         self.js = None
         self.zoom = 1.0
+        self.dark_mode = browser.dark_mode
 
     def run_animation_frame(self, scroll):
         if not self.scroll_changed_in_tab:
@@ -269,6 +270,10 @@ class Tab:
         self.browser.measure.time("render")
 
         if self.needs_style:
+            if self.dark_mode:
+                INHERITED_PROPERTIES['color'] = "white"
+            else:
+                INHERITED_PROPERTIES['color'] = "black"
             style(self.nodes, sorted(self.rules, key=cascade_priority), self)
             self.needs_layout = True
             self.needs_style = False
@@ -322,4 +327,8 @@ class Tab:
         self.scroll /= self.zoom
         self.zoom = 1
         self.scroll_changed_in_tab = True
+        self.set_needs_render()
+
+    def set_dark_mode(self, val):
+        self.dark_mode = val
         self.set_needs_render()
