@@ -31,19 +31,10 @@ def mainloop(browser):
                 browser.handle_quit()
                 sdl2.SDL_Quit()
                 sys.exit()
+                break
             elif event.type == sdl2.SDL_MOUSEBUTTONUP:
                 browser.handle_click(event.button)
             elif event.type == sdl2.SDL_KEYDOWN:
-                print("key down", event.key.keysym.sym)
-                if event.key.keysym.sym == sdl2.SDLK_RETURN:
-                    browser.handle_enter()
-                elif event.key.keysym.sym == sdl2.SDLK_DOWN:
-                    browser.handle_down()
-                elif event.key.keysym.sym == sdl2.SDLK_UP:
-                    browser.handle_up()
-                elif event.key.keysym.sym == sdl2.SDLK_RCTRL or event.key.keysym.sym == sdl2.SDLK_LCTRL:
-                    ctrl_down = True
-
                 if ctrl_down:
                     if event.key.keysym.sym == sdl2.SDLK_EQUALS:
                         browser.increment_zoom(True)
@@ -51,15 +42,44 @@ def mainloop(browser):
                         browser.increment_zoom(False)
                     elif event.key.keysym.sym == sdl2.SDLK_0:
                         browser.reset_zoom()
+                    elif event.key.keysym.sym == sdl2.SDLK_LEFT:
+                        browser.go_back()
+                    elif event.key.keysym.sym == sdl2.SDLK_l:
+                        browser.focus_addressbar()
+                    elif event.key.keysym.sym == sdl2.SDLK_a:
+                        browser.toggle_accessibility()
                     elif event.key.keysym.sym == sdl2.SDLK_d:
                         browser.toggle_dark_mode()
+                    elif event.key.keysym.sym == sdl2.SDLK_m:
+                        browser.toggle_mute()
+                    elif event.key.keysym.sym == sdl2.SDLK_t:
+                        browser.new_tab("https://browser.engineering/")
+                    elif event.key.keysym.sym == sdl2.SDLK_TAB:
+                        browser.cycle_tabs()
+                    elif event.key.keysym.sym == sdl2.SDLK_q:
+                        browser.handle_quit()
+                        sdl2.SDL_Quit()
+                        sys.exit()
+                        break
+                elif event.key.keysym.sym == sdl2.SDLK_RETURN:
+                    browser.handle_enter()
+                elif event.key.keysym.sym == sdl2.SDLK_DOWN:
+                    browser.handle_down()
+                elif event.key.keysym.sym == sdl2.SDLK_TAB:
+                    browser.handle_tab()
+                elif (
+                    event.key.keysym.sym == sdl2.SDLK_RCTRL
+                    or event.key.keysym.sym == sdl2.SDLK_LCTRL
+                ):
+                    ctrl_down = True
             elif event.type == sdl2.SDL_KEYUP:
-                print("key up", event.key.keysym.sym, ctrl_down)
-                if event.key.keysym.sym == sdl2.SDLK_RCTRL or event.key.keysym.sym == sdl2.SDLK_LCTRL:
+                if (
+                    event.key.keysym.sym == sdl2.SDLK_RCTRL
+                    or event.key.keysym.sym == sdl2.SDLK_LCTRL
+                ):
                     ctrl_down = False
-            elif event.type == sdl2.SDL_TEXTINPUT:
+            elif event.type == sdl2.SDL_TEXTINPUT and not ctrl_down:
                 browser.handle_key(event.text.text.decode("utf8"))
-
         browser.composite_raster_and_draw()
         browser.schedule_animation_frame()
 
@@ -301,10 +321,19 @@ class Browser:
             self.active_tab.task_runner.schedule_task(task)
         self.lock.release()
 
+    def handle_tab(self):
+        self.focus = "content"
+        self.chrome.blur()
+        task = Task(self.active_tab.advance_tab)
+        self.active_tab.task_runner.schedule_task(task)
+
     def handle_enter(self):
         self.lock.acquire(blocking=True)
         if self.chrome.enter():
             self.set_needs_raster()
+        elif self.focus == "content":
+            task = Task(self.active_tab.enter)
+            self.active_tab.task_runner.schedule_task(task)
         self.lock.release()
 
     def raster_tab(self):
@@ -384,6 +413,11 @@ class Browser:
         task = Task(self.active_tab.set_dark_mode, self.dark_mode)
         self.active_tab.task_runner.schedule_task(task)
 
+    def go_back(self):
+        task = Task(self.active_tab.go_back)
+        self.active_tab.task_runner.schedule_task(task)
+        self.clear_data()
+
     def new_tab(self, url):
         self.lock.acquire(blocking=True)
         self.new_tab_internal(url)
@@ -447,6 +481,20 @@ class Browser:
         self.display_list = []
         self.composited_layers = []
         self.composited_updates = {}
+
+    def focus_addressbar(self):
+        self.lock.acquire(blocking=True)
+        self.focus = None
+        self.chrome.focus_addressbar()
+        self.set_needs_raster()
+        self.lock.release()
+
+    def cycle_tabs(self):
+        self.lock.acquire(blocking=True)
+        active_idx = self.tabs.index(self.active_tab)
+        new_active_idx = (active_idx + 1) % len(self.tabs)
+        self.set_active_tab(self.tabs[new_active_idx])
+        self.lock.release()
 
 
 if __name__ == "__main__":

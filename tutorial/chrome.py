@@ -111,7 +111,7 @@ class Chrome:
 
         cmds.append(DrawOutline(self.address_rect, color, 1))
 
-        if self.focus == "address_bar":
+        if self.focus == "address bar":
             cmds.append(
                 DrawText(
                     self.address_rect.left() + self.padding,
@@ -143,13 +143,13 @@ class Chrome:
         return cmds
 
     def keypress(self, char):
-        if self.focus == "address_bar":
+        if self.focus == "address bar":
             self.address_bar += char
             return True
         return False
     
     def enter(self):
-        if self.focus == "address_bar":
+        if self.focus == "address bar":
             self.browser.schedule_load(URL(self.address_bar))
             self.focus = None
             return True
@@ -162,7 +162,7 @@ class Chrome:
             task = Task(self.browser.active_tab.go_back)
             self.browser.active_tab.task_runner.schedule_task(task)
         elif self.address_rect.contains(x, y):
-            self.focus = "address_bar"
+            self.focus = "address bar"
             self.address_bar = ""
         else:
             for i, tab in enumerate(self.browser.tabs):
@@ -175,3 +175,7 @@ class Chrome:
 
     def blur(self):
         self.focus = None
+
+    def focus_addressbar(self):
+        self.focus = "address bar"
+        self.address_bar = ""
