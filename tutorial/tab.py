@@ -33,6 +33,47 @@ def is_focusable(node):
     else:
         return node.tag in ["input", "button", "a"]
 
+class AccessibilityNode:
+    def __init__(self, node):
+        self.node = node
+        self.children = []
+        self.text = ""
+        
+        if isinstance(node, Text):
+            if is_focusable(node.parent):
+                self.role = "focusable text"
+            else:
+                self.role = "StaticText"
+        else:
+            if "role" in node.attributes:
+                self.role = node.attributes["role"]
+            elif node.tag == "a":
+                self.role = "link"
+            elif node.tag == "input":
+                self.role = "textbox"
+            elif node.tag == "button":
+                self.role = "button"
+            elif node.tag == "html":
+                self.role = "document"
+            elif is_focusable(node):
+                self.role = "focusable"
+            else:
+                self.role = "none"
+
+    def build(self):
+        for child_node in self.node.children:
+            self.build_internal(child_node)
+
+    def build_internal(self, child_node):
+        child = AccessibilityNode(child_node)
+        if child.role != "none":
+            self.children.append(child)
+            child.build()
+        else:
+            for grandchild_node in child_node.children:
+                child.build_internal(grandchild_node)
+
+
 class Tab:
     def __init__(self, browser, tab_height):
         self.history = []
@@ -59,6 +100,8 @@ class Tab:
         self.zoom = 1.0
         self.dark_mode = browser.dark_mode
         self.needs_focus_scroll = False
+        self.needs_accessibility = False
+        self.accessibility_tree = None
 
     def run_animation_frame(self, scroll):
         if not self.scroll_changed_in_tab:
@@ -304,8 +347,15 @@ class Tab:
         if self.needs_layout:
             self.document = DocumentLayout(self.nodes)
             self.document.layout(self.zoom)
+            self.needs_accessibility = True
             self.needs_paint = True
             self.needs_layout = False
+
+        if self.needs_accessibility:
+            self.accessibility_tree = AccessibilityNode(self.nodes)
+            self.accessibility_tree.build()
+            print(self.accessibility_tree)
+            self.needs_accessibility = False
 
         if self.needs_paint:
             self.display_list = []
