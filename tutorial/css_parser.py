@@ -887,6 +887,7 @@ class Transform(VisualEffect):
 class BlockLayout:
     def __init__(self, node, parent, previous):
         self.node = node
+        node.layout_object = self
         self.parent = parent
         self.previous = previous
         self.children = []

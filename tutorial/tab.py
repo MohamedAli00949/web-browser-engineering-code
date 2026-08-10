@@ -72,6 +72,31 @@ class AccessibilityNode:
             else:
                 self.role = "none"
 
+        self.bounds = self.compute_bounds()
+
+    def compute_bounds(self):
+        if self.node.layout_object:
+            return [absolute_bounds_for_obj(self.node.layout_object)]
+
+        if isinstance(self.node, Text):
+            return []
+
+        inline = self.node.parent
+        bounds = []
+        while not inline.layout_object:
+            inline = inline.parent
+        for line in inline.layout_object.children:
+            line_bounds = skia.Rect.MakeEmpty()
+            for child in line.children:
+                if child.node.parent == self.node:
+                    line_bounds.join(
+                        skia.Rect.MakeXYWH(child.x, child.y, child.width, child.height)
+                    )
+
+            bounds.append(line_bounds)
+
+        return bounds
+
     def build(self):
         for child_node in self.node.children:
             self.build_internal(child_node)
@@ -111,6 +136,21 @@ class AccessibilityNode:
         else:
             for grandchild_node in child_node.children:
                 child.build_internal(grandchild_node)
+    
+    def contains_point(self, x, y):
+        for bound in self.bounds:
+            if bound.contains(x, y):
+                return True
+        return False
+    
+    def hit_test(self, x, y):
+        node = None
+        if self.contains_point(x, y):
+            node = self
+        for child in self.children:
+            res = child.hit_test(x, y)
+            if res: node = res
+        return node
 
 
 class Tab:
@@ -184,7 +224,7 @@ class Tab:
             self.display_list,
             composited_updates,
             self.accessibility_tree,
-            self.focus
+            self.focus,
         )
         self.display_list = None
         self.scroll_changed_in_tab = False

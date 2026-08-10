@@ -35,6 +35,8 @@ def mainloop(browser):
                 break
             elif event.type == sdl2.SDL_MOUSEBUTTONUP:
                 browser.handle_click(event.button)
+            elif event.type == sdl2.SDL_MOUSEMOTION:
+                browser.handle_hover(event.motion)
             elif event.type == sdl2.SDL_KEYDOWN:
                 if ctrl_down:
                     if event.key.keysym.sym == sdl2.SDLK_EQUALS:
@@ -176,6 +178,16 @@ class Browser:
         self.last_tab_focus = None
         self.active_alerts = []
         self.spoken_alerts = []
+        self.pending_hover = None
+        self.hovered_a11y_node = None
+        self.needs_speak_hovered_node = False
+
+    def handle_hover(self, event):
+        if not self.accessibility_is_on or not self.accessibility_tree:
+            return
+
+        self.pending_hover = (event.x, event.y - self.chrome.bottom)
+        self.set_needs_accessibility()
 
     def update_accessibility(self):
         if not self.accessibility_tree:
@@ -186,7 +198,8 @@ class Browser:
             self.has_spoken_document = True
 
         self.active_alerts = [
-            node for node in tree_to_list(self.accessibility_tree, []) 
+            node
+            for node in tree_to_list(self.accessibility_tree, [])
             if node.role == "alert"
         ]
 
@@ -198,9 +211,9 @@ class Browser:
         new_spoken_alerts = []
         for old_node in self.spoken_alerts:
             new_nodes = [
-                node for node in tree_to_list(self.accessibility_tree, [])
-                if node.node == old_node.node
-                and node.role == "alert"
+                node
+                for node in tree_to_list(self.accessibility_tree, [])
+                if node.node == old_node.node and node.role == "alert"
             ]
             if new_nodes:
                 new_spoken_alerts.append(new_nodes[0])
@@ -217,6 +230,10 @@ class Browser:
                 self.focus_a11y_node = nodes[0]
                 self.speak_node(self.focus_a11y_node, "element focused ")
             self.last_tab_focus = self.tab_focus
+
+            if self.needs_speak_hovered_node:
+                self.speak_node(self.hovered_a11y_node, "Hit text ")
+            self.needs_speak_hovered_node = False
 
     def speak_document(self):
         text = "Here are the document contents: "
@@ -548,6 +565,22 @@ class Browser:
                     parent = parent.parent
             if not parent:
                 self.draw_list.append(current_effect)
+
+        if self.pending_hover:
+            x, y = self.pending_hover
+            y += self.active_tab_scroll
+            a11y_node = self.accessibility_tree.hit_test(x, y)
+            if a11y_node:
+                if not self.hovered_a11y_node or a11y_node.node != self.hovered_a11y_node.node:
+                    self.needs_speak_hovered_node = True
+                self.hovered_a11y_node = a11y_node
+            self.pending_hover = None
+
+        if self.hovered_a11y_node:
+            for bound in self.hovered_a11y_node.bounds:
+                self.draw_list.append(
+                    DrawOutline(bound, "white" if self.dark_mode else "black", 2)
+                )
 
     def clear_data(self):
         self.active_tab_scroll = 0
