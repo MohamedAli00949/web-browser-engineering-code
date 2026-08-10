@@ -12,12 +12,23 @@ DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
 
 class CommitData:
-    def __init__(self, url, scroll, height, display_list, composited_updates):
+    def __init__(
+        self,
+        url,
+        scroll,
+        height,
+        display_list,
+        composited_updates,
+        accessibility_tree,
+        focus,
+    ):
         self.url = url
         self.scroll = scroll
         self.height = height
         self.display_list = display_list
         self.composited_updates = composited_updates
+        self.accessibility_tree = accessibility_tree
+        self.focus = focus
 
 
 def get_tabindex(node):
@@ -33,12 +44,13 @@ def is_focusable(node):
     else:
         return node.tag in ["input", "button", "a"]
 
+
 class AccessibilityNode:
     def __init__(self, node):
         self.node = node
         self.children = []
         self.text = ""
-        
+
         if isinstance(node, Text):
             if is_focusable(node.parent):
                 self.role = "focusable text"
@@ -63,6 +75,33 @@ class AccessibilityNode:
     def build(self):
         for child_node in self.node.children:
             self.build_internal(child_node)
+
+        if self.role == "StaticText":
+            self.text = repr(self.node.text)
+        elif self.role == "focusable text":
+            self.text = "Focusable text:" + self.node.text
+        elif self.role == "focusable":
+            self.text = "Focusable element"
+        elif self.role == "textbox":
+            if "value" in self.node.attributes:
+                value = self.node.attributes["value"]
+            elif self.node.tag != "input" and self.node.children:
+                isinstance(self.node.children[0], Text)
+                value = self.node.children[0].text
+            else:
+                value = ""
+            self.text = "Input box: " + value
+        elif self.role == "button":
+            self.text = "Button"
+        elif self.role == "link":
+            self.text = "Link"
+        elif self.role == "alert":
+            self.text = "Alert"
+        elif self.role == "document":
+            self.text = "Document"
+
+        if self.node.is_focused:
+            self.text += " is focused"
 
     def build_internal(self, child_node):
         child = AccessibilityNode(child_node)
@@ -139,10 +178,17 @@ class Tab:
 
         document_height = math.ceil(self.document.height + 2 * VSTEP)
         commit_data = CommitData(
-            self.url, scroll, document_height, self.display_list, composited_updates
+            self.url,
+            scroll,
+            document_height,
+            self.display_list,
+            composited_updates,
+            self.accessibility_tree,
+            self.focus
         )
         self.display_list = None
         self.scroll_changed_in_tab = False
+        self.accessibility_tree = None
 
         self.browser.commit(self, commit_data)
 
@@ -459,11 +505,9 @@ class Tab:
             node.is_focused = True
 
     def scroll_to(self, elt):
-        objs = [
-            obj for obj in tree_to_list(self.document, []) 
-            if obj.node == elt
-        ]
-        if not objs: return
+        objs = [obj for obj in tree_to_list(self.document, []) if obj.node == elt]
+        if not objs:
+            return
         obj = objs[0]
 
         if self.scroll < obj.y < self.scroll + self.tab_height:

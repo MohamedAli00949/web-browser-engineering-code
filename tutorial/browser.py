@@ -20,6 +20,7 @@ from utils import *
 from constants import *
 from tasks import *
 from measure_time import *
+from speech_text import *
 
 
 def mainloop(browser):
@@ -168,6 +169,72 @@ class Browser:
         assert self.chrome_surface is not None
 
         self.dark_mode = False
+        self.needs_accessibility = False
+        self.accessibility_is_on = False
+        self.has_spoken_document = False
+        self.tab_focus = None
+        self.last_tab_focus = None
+        self.active_alerts = []
+        self.spoken_alerts = []
+
+    def update_accessibility(self):
+        if not self.accessibility_tree:
+            return
+
+        if not self.has_spoken_document:
+            self.speak_document()
+            self.has_spoken_document = True
+
+        self.active_alerts = [
+            node for node in tree_to_list(self.accessibility_tree, []) 
+            if node.role == "alert"
+        ]
+
+        for alert in self.active_alerts:
+            if alert not in self.spoken_alerts:
+                self.speak_node(alert, "New alert")
+                self.spoken_alerts.append(alert)
+
+        new_spoken_alerts = []
+        for old_node in self.spoken_alerts:
+            new_nodes = [
+                node for node in tree_to_list(self.accessibility_tree, [])
+                if node.node == old_node.node
+                and node.role == "alert"
+            ]
+            if new_nodes:
+                new_spoken_alerts.append(new_nodes[0])
+        self.spoken_alerts = new_spoken_alerts
+
+        if self.tab_focus and self.tab_focus != self.last_tab_focus:
+            nodes = [
+                node
+                for node in tree_to_list(self.accessibility_tree, [])
+                if node.node == self.tab_focus
+            ]
+
+            if nodes:
+                self.focus_a11y_node = nodes[0]
+                self.speak_node(self.focus_a11y_node, "element focused ")
+            self.last_tab_focus = self.tab_focus
+
+    def speak_document(self):
+        text = "Here are the document contents: "
+        tree_list = tree_to_list(self.accessibility_tree, [])
+        for accessibility_node in tree_list:
+            new_text = accessibility_node.text
+            if new_text:
+                text += "\n" + new_text
+
+        speak_text(text)
+
+    def speak_node(self, node, text):
+        text = node.text
+        if text and node.children and node.children[0].role == "StaticText":
+            text += " " + node.children[0].text
+
+        if text:
+            speak_text(text)
 
     def toggle_dark_mode(self):
         self.dark_mode = not self.dark_mode
@@ -214,6 +281,11 @@ class Browser:
             self.draw()
             self.measure.stop("draw")
         self.measure.stop("composite_raster_and_draw")
+
+        if self.needs_accessibility:
+            self.update_accessibility()
+            self.needs_accessibility = False
+
         self.needs_composite = False
         self.needs_raster = False
         self.needs_draw = False
@@ -244,6 +316,8 @@ class Browser:
                 self.set_needs_composite()
             else:
                 self.set_needs_draw()
+            self.tab_focus = data.focus
+        self.accessibility_tree = data.accessibility_tree
         self.lock.release()
 
     def set_needs_draw(self):
@@ -481,6 +555,7 @@ class Browser:
         self.display_list = []
         self.composited_layers = []
         self.composited_updates = {}
+        self.accessibility_tree = None
 
     def focus_addressbar(self):
         self.lock.acquire(blocking=True)
@@ -496,6 +571,20 @@ class Browser:
         self.set_active_tab(self.tabs[new_active_idx])
         self.lock.release()
 
+    def set_needs_accessibility(self):
+        print("set needs accessibility")
+        if not self.accessibility_is_on:
+            return
+        self.needs_accessibility = True
+        self.needs_draw = True
+
+    def toggle_accessibility(self):
+        print("toggle accessibility")
+        self.lock.acquire(blocking=True)
+        self.accessibility_is_on = not self.accessibility_is_on
+        self.set_needs_accessibility()
+        self.lock.release()
+
 
 if __name__ == "__main__":
     sdl2.SDL_Init(sdl2.SDL_INIT_EVENTS)
@@ -507,4 +596,3 @@ if __name__ == "__main__":
         browser.new_tab(URL("file://" + DEFAULT_FILE))
 
     mainloop(browser)
-    # tkinter.mainloop()
