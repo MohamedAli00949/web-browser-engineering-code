@@ -1,5 +1,5 @@
 import socket
-import urllib
+import urllib.parse
 import random
 import html
 
