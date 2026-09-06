@@ -1,5 +1,6 @@
 import skia
-from  constants import *
+from constants import *
+
 
 def parse_color(color):
     if color.startswith("#") and len(color) == 7:
@@ -20,22 +21,24 @@ def parse_color(color):
     else:
         return skia.ColorBLACK
 
+
 def linespace(font):
-  metrics = font.getMetrics()
-  return metrics.fDescent - metrics.fAscent
+    metrics = font.getMetrics()
+    return metrics.fDescent - metrics.fAscent
 
 
 FONTS = {}
 
+
 def get_font(size, weight, style):
     key = (size, weight, style)
     if key not in FONTS:
-        if weight == 'bold':
+        if weight == "bold":
             skia_weight = skia.FontStyle.kBold_Weight
         else:
             skia_weight = skia.FontStyle.kNormal_Weight
-        
-        if style == 'italic':
+
+        if style == "italic":
             skia_style = skia.FontStyle.kItalic_Slant
         else:
             skia_style = skia.FontStyle.kUpright_Slant
@@ -43,12 +46,22 @@ def get_font(size, weight, style):
         skia_width = skia.FontStyle.kNormal_Width
         style_info = skia.FontStyle(skia_weight, skia_width, skia_style)
 
-        font = skia.Typeface('Arial', style_info)
+        font = skia.Typeface("Arial", style_info)
         # f = font.Font(size=size, weight=weight, slant=style)
         # label = tkinter.Label(font=f)
         FONTS[key] = font
 
     return skia.Font(FONTS[key], size)
 
+
 def dpx(css_px, zoom):
     return css_px * zoom
+
+
+def font(style, zoom):
+    weight = style["font-weight"]
+    variant = style["font-style"]
+    size = float(style["font-size"][:-2]) * 0.75
+    font_size = dpx(size, zoom)
+
+    return get_font(font_size, weight, variant)

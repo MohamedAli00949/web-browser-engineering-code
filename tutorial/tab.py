@@ -9,7 +9,7 @@ from jscontext import JSContext
 import math
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
-
+BROKEN_IMAGE = skia.Image.open("Broken_Image.png")
 
 class CommitData:
     def __init__(
@@ -65,6 +65,8 @@ class AccessibilityNode:
                 self.role = "textbox"
             elif node.tag == "button":
                 self.role = "button"
+            elif node.tag == "img":
+                self.role = "image"
             elif node.tag == "html":
                 self.role = "document"
             elif is_focusable(node):
@@ -124,6 +126,11 @@ class AccessibilityNode:
             self.text = "Alert"
         elif self.role == "document":
             self.text = "Document"
+        elif self.role == "image":
+            if "alt" in self.node.attributes:
+                self.text = "Image: " + self.node.attributes["alt"]
+            else:
+                self.text = "Image"
 
         if self.node.is_focused:
             self.text += " is focused"
@@ -136,20 +143,21 @@ class AccessibilityNode:
         else:
             for grandchild_node in child_node.children:
                 child.build_internal(grandchild_node)
-    
+
     def contains_point(self, x, y):
         for bound in self.bounds:
             if bound.contains(x, y):
                 return True
         return False
-    
+
     def hit_test(self, x, y):
         node = None
         if self.contains_point(x, y):
             node = self
         for child in self.children:
             res = child.hit_test(x, y)
-            if res: node = res
+            if res:
+                node = res
         return node
 
 
@@ -277,6 +285,7 @@ class Tab:
         self.task_runner.clear_pending_tasks()
 
         headers, body = url.request(self.url, payload)
+        body = body.decode("utf8", "replace")
         self.url = url
         self.history.append(url)
 
@@ -309,6 +318,7 @@ class Tab:
 
             try:
                 headers, body = script_url.request(self.url, None)
+                body = body.decode("utf8", "replace")
                 self.js.run(script_url, body)
             except dukpy.JSRuntimeError as e:
                 print("Script: ", script, "crashed: ", e)
@@ -332,9 +342,32 @@ class Tab:
                 continue
             try:
                 header, body = style_url.request(url)
+                body = body.decode("utf8", "replace")
             except:
                 continue
             self.rules.extend(CSSParser(body).parse())
+
+        images = [node 
+                for node in tree_to_list(self.nodes, []) 
+                if isinstance(node, Element) and node.tag == 'img']
+        for img in images:
+            try:
+                src = img.attributes.get("src", "")
+                image_url = url.resolve(src)
+                assert self.allowed_request(image_url), \
+                    "Blocked load of " + str(image_url) + " due to CSP"
+                header, body = image_url.request(url)
+                img.encoded_data = body
+                data = skia.Data.MakeWithoutCopy(body)
+                img.image = skia.Image.MakeFromEncoded(data)
+                assert img.image, \
+                    "Failed to recognize image format for " + \
+                        str(image_url)
+            except Exception as e:
+                print("Image", img.attributes.get("src", ""),
+                    "crashed", e)
+                img.image = BROKEN_IMAGE
+
 
         self.set_needs_render()
         self.loaded = True

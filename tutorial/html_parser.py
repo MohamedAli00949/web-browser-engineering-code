@@ -26,6 +26,7 @@ class Element:
     def __repr__(self):
         return "<" + self.tag + ">"
 
+
 def print_tree(node, indent=0):
     print(" " * indent, node)
     for child in node.children:
