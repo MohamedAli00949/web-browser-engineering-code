@@ -138,3 +138,7 @@ class JSContext:
     # task = Task(callback)
     # self.tab.task_runner.schedule_task(task)
     self.tab.browser.set_needs_animation_frame(self.tab)
+
+  def dispatch_RAF(self, window_id):
+    code = self.wrap("window.__runRAFHandlers()", window_id)
+    self.interp.evaljs(code)

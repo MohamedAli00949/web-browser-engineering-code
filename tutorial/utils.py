@@ -65,3 +65,15 @@ def font(style, zoom):
     font_size = dpx(size, zoom)
 
     return get_font(font_size, weight, variant)
+
+def get_tabindex(node):
+    tabindex = int(node.attributes.get("tabindex", "9999999"))
+    return 9999999 if tabindex == 0 else tabindex
+
+def is_focusable(node):
+    if get_tabindex(node) < 0:
+        return False
+    elif "tabindex" in node.attributes:
+        return True
+    else:
+        return node.tag in ["input", "button", "a"]
