@@ -3,6 +3,7 @@ from html_parser import Element
 from constants import *
 from html_parser import Text
 from utils import *
+from constants import *
 
 
 def parse_transition(value):
@@ -685,8 +686,8 @@ class InputLayout(EmbedLayout):
 
 
 class ImageLayout(EmbedLayout):
-    def __init__(self, node, parent, previous):
-        super().__init__(node, parent, previous, None)
+    def __init__(self, node, parent, previous, frame):
+        super().__init__(node, parent, previous, frame)
 
     def layout(self):
         super().layout()
@@ -728,6 +729,64 @@ class ImageLayout(EmbedLayout):
         return cmds
 
     def paint_effects(self, cmds):
+        return cmds
+
+
+class IframeLayout(EmbedLayout):
+    def __init__(self, node, parent, previous, parent_frame):
+        super().__init__(node, parent, previous, parent_frame)
+
+    def layout(self):
+        super().layout()
+
+        width_attr = self.node.attributes.get("width")
+        height_attr = self.node.attributes.get("height")
+
+        if width_attr:
+            self.width = dpx(int(width_attr) + 2, self.zoom)
+        else:
+            self.width = dpx(IFRAME_WIDTH_PX + 2, self.zoom)
+
+        if height_attr:
+            self.height = dpx(int(height_attr) + 2, self.zoom)
+        else:
+            self.height = dpx(IFRAME_HEIGHT_PX + 2, self.zoom)
+
+        if self.node.frame:
+            self.node.frame.frame_height = self.height - dpx(2, self.zoom)
+            self.node.frame.frame_width = self.width - dpx(2, self.zoom)
+
+        self.ascent = -self.height
+        self.descent = 0
+
+    def paint_effects(self, cmds):
+        rect = skia.Rect.MakeLTRB(
+            self.x, self.y, self.x + self.width, self.y + self.height
+        )
+
+        diff = dpx(1, self.zoom)
+        offset = (self.x + diff, self.y + diff)
+        cmds = [Transform(offset, rect, self.node, cmds)]
+        inner_rect = skia.Rect.MakeLTRB(
+            self.x + diff,
+            self.y + diff,
+            self.x + self.width - diff,
+            self.y + self.height - diff,
+        )
+        internal_cmds = cmds
+        internal_cmds.append(
+            Blend(
+                1.0,
+                "destination-in",
+                None,
+                [DrawRRect(inner_rect, 0, "white")],
+                internal_cmds,
+            )
+        )
+        cmds = [Blend(1.0, "source-over", self.node, internal_cmds)]
+        paint_outline(self.node, cmds, rect, self.zoom)
+        cmds = paint_visual_effects(self.node, cmds, rect)
+
         return cmds
 
 
@@ -963,7 +1022,7 @@ class Transform(VisualEffect):
 
 
 class BlockLayout:
-    def __init__(self, node, parent, previous):
+    def __init__(self, node, parent, previous, frame):
         self.node = node
         node.layout_object = self
         self.parent = parent
@@ -975,15 +1034,17 @@ class BlockLayout:
         self.width = None
         self.height = None
 
-        self.display_list = []
-        self.weight = "normal"
-        self.style = "roman"
-        self.cursor_x, self.cursor_y = HSTEP, VSTEP
-        self.size = 12
-        self.word_font = get_font(self.size, self.weight, self.style)
+        self.frame = frame
 
-        for child in self.children:
-            child.layout()
+        # self.display_list = []
+        # self.weight = "normal"
+        # self.style = "roman"
+        # self.cursor_x, self.cursor_y = HSTEP, VSTEP
+        # self.size = 12
+        # self.word_font = get_font(self.size, self.weight, self.style)
+
+        # for child in self.children:
+        #     child.layout()
 
     def self_rect(self):
         return skia.Rect.MakeXYWH(
@@ -1008,7 +1069,7 @@ class BlockLayout:
 
     def input(self, node):
         w = dpx(INPUT_WIDTH_PX, self.zoom)
-        self.add_inline_child(node, w, InputLayout)
+        self.add_inline_child(node, w, InputLayout, self.frame)
 
     def layout(self):
         self.zoom = self.parent.zoom
@@ -1047,6 +1108,8 @@ class BlockLayout:
                 self.input(node)
             elif node.tag == "img":
                 self.image(node)
+            elif node.tag == "iframe" and "src" in node.attributes:
+                self.iframe(node)
             else:
                 for child in node.children:
                     self.recurse(child)
@@ -1100,6 +1163,13 @@ class BlockLayout:
             w = dpx(node.image.width(), self.zoom)
         self.add_inline_child(node, w, ImageLayout)
 
+    def iframe(self, node):
+        if "width" in self.node.attributes:
+            w = dpx(int(self.node.attributes["width"]), self.zoom)
+        else:
+            w = IFRAME_WIDTH_PX + dpx(2, self.zoom)
+        self.add_inline_child(node, w, IframeLayout, self.frame)
+
     def flush(self):
         if not self.line:
             return
@@ -1133,7 +1203,7 @@ class BlockLayout:
                 if child.tag in BLOCK_ELEMENTS:
                     return "block"
             return "inline"
-        elif self.node.tag in ["input", "img"]:
+        elif self.node.tag in ["input", "img", "iframe"]:
             return "inline"
         else:
             return "block"
@@ -1148,7 +1218,7 @@ class BlockLayout:
 
         return cmds
 
-    def add_inline_child(self, node, w, child_class, word=None):
+    def add_inline_child(self, node, w, child_class, frame, word=None):
         if self.cursor_x + w > self.x + self.width:
             self.new_line()
         line = self.children[-1]
@@ -1156,6 +1226,6 @@ class BlockLayout:
         if word:
             child = child_class(node, word, line, previous_word)
         else:
-            child = child_class(node, line, previous_word)
+            child = child_class(node, line, previous_word, frame)
         line.children.append(child)
         self.cursor_x += w + font(node.style, self.zoom).measureText(" ")
