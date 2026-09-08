@@ -3,6 +3,7 @@ from html_parser import *
 import math
 from accessibility_node import *
 from frame import Frame
+from jscontext import *
 
 
 class CommitData:
@@ -57,23 +58,35 @@ class Tab:
         self.needs_accessibility = False
         self.accessibility_tree = None
         self.window_id_to_frame = {}
+        self.origin_to_js = {}
+
+    def get_js(self, url):
+        origin = url.origin()
+        if origin not in self.origin_to_js:
+            self.origin_to_js[origin] = JSContext(self, origin)
+
+        return self.origin_to_js[origin]
+
+    def post_message(self, message, target_window_id):
+        frame = self.window_id_to_frame[target_window_id]
+        frame.js.dispatch_post_message(message, target_window_id)
 
     def run_animation_frame(self, scroll):
-        if not self.root_frame.scroll_changed_in_tab:
+        if not self.root_frame.scroll_changed_in_frame:
             self.root_frame.scroll = scroll
 
         need_composite = False
 
-        for (window_id, frame) in self.window_id_to_frame.items():
+        for window_id, frame in self.window_id_to_frame.items():
             if not frame.loaded:
                 continue
 
             self.browser.measure.time("script-runRAFHandlers")
-            self.js.dispatch_RAF(frame.window_id)
+            frame.js.dispatch_RAF(frame.window_id)
             self.browser.measure.stop("script-runRAFHandlers")
 
-            for node in tree_to_list(self.nodes, []):
-                for (property_name, animation) in node.animations.items():
+            for node in tree_to_list(frame.nodes, []):
+                for property_name, animation in node.animations.items():
                     value = animation.animate()
                     if value:
                         node.style[property_name] = value
@@ -88,7 +101,7 @@ class Tab:
             self.focused_frame.scroll_to(self.focus)
             self.focused_frame.needs_focus_scroll = False
 
-        for (window_id, frame) in self.window_id_to_frame.items():
+        for window_id, frame in self.window_id_to_frame.items():
             if frame == self.root_frame:
                 continue
             if frame.scroll_changed_in_frame:
@@ -96,7 +109,7 @@ class Tab:
                 frame.scroll_changed_in_frame = False
 
         scroll = None
-        if self.root_frame.scroll_changed_in_tab:
+        if self.root_frame.scroll_changed_in_frame:
             scroll = self.root_frame.scroll
 
         composited_updates = None
@@ -110,7 +123,7 @@ class Tab:
             not self.focused_frame or self.focused_frame == self.root_frame
         )
         commit_data = CommitData(
-            self.url,
+            self.root_frame.url,
             scroll,
             root_frame_focused,
             math.ceil(self.root_frame.document.height),
@@ -120,7 +133,7 @@ class Tab:
             self.focus,
         )
         self.display_list = None
-        self.root_frame.scroll_changed_in_tab = False
+        self.root_frame.scroll_changed_in_frame = False
 
         self.browser.commit(self, commit_data)
 
