@@ -36,8 +36,6 @@ class AccessibilityNode:
             else:
                 self.role = "none"
 
-        self.bounds = self.compute_bounds()
-
     def compute_bounds(self):
         if self.node.layout_object:
             return [absolute_bounds_for_obj(self.node.layout_object)]
@@ -66,7 +64,7 @@ class AccessibilityNode:
             self.build_internal(child_node)
 
         if self.role == "StaticText":
-            self.text = repr(self.node.text)
+            self.text = self.node.text
         elif self.role == "focusable text":
             self.text = "Focusable text:" + self.node.text
         elif self.role == "focusable":
@@ -74,8 +72,11 @@ class AccessibilityNode:
         elif self.role == "textbox":
             if "value" in self.node.attributes:
                 value = self.node.attributes["value"]
-            elif self.node.tag != "input" and self.node.children:
-                isinstance(self.node.children[0], Text)
+            elif (
+                self.node.tag != "input"
+                and self.node.children
+                and isinstance(self.node.children[0], Text)
+            ):
                 value = self.node.children[0].text
             else:
                 value = ""
@@ -106,9 +107,9 @@ class AccessibilityNode:
             and child_node.frame
             and child_node.frame.loaded
         ):
-            child = FrameAccessibilityNode(child_node.frame.nodes)
+            child = FrameAccessibilityNode(child_node, self)
         else:
-            child = AccessibilityNode(child_node)
+            child = AccessibilityNode(child_node, self)
 
         if child.role != "none":
             self.children.append(child)
@@ -116,6 +117,9 @@ class AccessibilityNode:
         else:
             for grandchild_node in child_node.children:
                 child.build_internal(grandchild_node)
+
+    def map_to_parent(self, rect):
+        pass
 
     def absolute_bounds(self):
         abs_bounds = []
@@ -126,14 +130,13 @@ class AccessibilityNode:
                 obj = self.parent
             else:
                 obj = self
-            
+
             while obj:
                 obj.map_to_parent(abs_bound)
                 obj = obj.parent
             abs_bounds.append(abs_bound)
 
         return abs_bounds
-
 
     def contains_point(self, x, y):
         for bound in self.bounds:
@@ -158,18 +161,23 @@ class FrameAccessibilityNode(AccessibilityNode):
         self.scroll = self.node.frame.scroll
         self.zoom = self.node.layout_object.zoom
 
-
     def build(self):
         self.build_internal(self.node.frame.nodes)
 
     def hit_test(self, x, y):
         bounds = self.bounds[0]
-        if not bounds.contains(x, y): return
+        if not bounds.contains(x, y):
+            return
         new_x = x - bounds.left() - dpx(1, self.zoom)
         new_y = y - bounds.top() - dpx(1, self.zoom) + self.scroll
         node = self
         for child in self.children:
             res = child.hit_test(new_x, new_y)
-            if res: node = res
+            if res:
+                node = res
         return node
 
+    def map_to_parent(self, rect):
+        bounds = self.bounds[0]
+        rect.offset(bounds.left(), bounds.top() - self.scroll)
+        rect.intersect(bounds)

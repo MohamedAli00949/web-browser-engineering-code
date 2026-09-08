@@ -93,7 +93,9 @@ class Frame:
                 print("Script: ", script, "crashed: ", e)
                 continue
             body = body.decode("utf8", "replace")
-            self.js.run(script_url, body)
+            # self.js.run(script_url, body)
+            task = Task(self.js.run, script_url, body, self.window_id)
+            self.tab.task_runner.schedule_task(task)
 
         self.rules = DEFAULT_STYLE_SHEET.copy()
         links = [
@@ -161,7 +163,7 @@ class Frame:
 
     def render(self):
         if self.needs_style:
-            if self.dark_mode:
+            if self.tab.dark_mode:
                 INHERITED_PROPERTIES["color"] = "white"
             else:
                 INHERITED_PROPERTIES["color"] = "black"
@@ -170,9 +172,9 @@ class Frame:
             self.needs_style = False
 
         if self.needs_layout:
-            self.document = DocumentLayout(self.nodes)
-            self.document.layout(self.zoom)
-            self.needs_accessibility = True
+            self.document = DocumentLayout(self.nodes, self)
+            self.document.layout(self.frame_width, self.zoom)
+            self.tab.needs_accessibility = True
             self.needs_paint = True
             self.needs_layout = False
 
@@ -282,8 +284,8 @@ class Frame:
             elif elt.tag == "iframe":
                 abs_bounds = absolute_bounds_for_obj(elt.layout_object)
                 border = dpx(1, elt.layout_object.zoom)
-                new_x = x - abs_bounds.x + border
-                new_y = y - abs_bounds.y + border
+                new_x = x - abs_bounds.left() + border
+                new_y = y - abs_bounds.top() + border
                 elt.frame.click(new_x, new_y)
                 return
             elif is_focusable(elt):
@@ -294,13 +296,13 @@ class Frame:
             elt = elt.parent
 
     def scrolldown(self):
-        max_y = max(self.document.height + 2 * VSTEP - self.tab_height, 0)
+        max_y = max(self.document.height + 2 * VSTEP - self.frame_height, 0)
         self.scroll = min(self.scroll + SCROLL_STEP, max_y)
 
         self.scroll_changed_in_frame = True
 
     def scrollup(self):
-        max_y = max(self.document.height + 2 * VSTEP + self.tab_height, 0)
+        max_y = max(self.document.height + 2 * VSTEP + self.frame_height, 0)
         self.scroll = max(max_y, self.scroll - SCROLL_STEP)
 
         self.scroll_changed_in_frame = True
@@ -320,19 +322,21 @@ class Frame:
 
     def clamp_scroll(self, scroll):
         height = math.ceil(self.document.height + 2 * VSTEP)
-        maxscroll = height - self.tab_height
+        maxscroll = height - self.frame_height
         return max(0, min(scroll, maxscroll))
     
     def scroll_to(self, elt):
-        objs = [obj for obj in tree_to_list(self.document, []) if obj.node == self.tab.focus]
-        if not objs:
-            return
+        assert not (self.needs_style or self.needs_layout)
+        objs = [
+            obj for obj in tree_to_list(self.document, [])
+            if obj.node == self.tab.focus
+        ]
+        if not objs: return
         obj = objs[0]
 
-        if self.scroll < obj.y < self.scroll + self.tab_height:
+        if self.scroll < obj.y < self.scroll + self.frame_height:
             return
-
-        document_height = math.ceil(self.document.height + 2 * VSTEP)
         new_scroll = obj.y - SCROLL_STEP
         self.scroll = self.clamp_scroll(new_scroll)
-        self.scroll_changed_in_tab = True
+        self.scroll_changed_in_frame = True
+        self.tab.set_needs_paint()
