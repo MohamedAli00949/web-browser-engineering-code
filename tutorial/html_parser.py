@@ -1,4 +1,4 @@
-from css_parser import *
+from iframe_layout import *
 
 class Text:
     def __init__(self, text, parent):
