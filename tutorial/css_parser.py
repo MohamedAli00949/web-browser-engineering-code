@@ -301,8 +301,8 @@ class DocumentLayout:
 
 
 class InputLayout(EmbedLayout):
-    def __init__(self, node, parent, previous):
-        super().__init__(node, parent, previous, None)
+    def __init__(self, node, parent, previous, frame):
+        super().__init__(node, parent, previous, frame)
 
     def layout(self):
         super().layout()
@@ -338,7 +338,7 @@ class InputLayout(EmbedLayout):
 
         if self.node.is_focused and self.node.tag == "input":
             cx = self.x + self.font.measureText(text)
-            cmds.append(DrawLine(cx, self.y, cx, self.y + self.height, color, 1))
+            cmds.append(DrawCursor(self, self.font.measureText(text)))
 
         return cmds
 
@@ -423,6 +423,11 @@ class Opacity:
             canvas.restore()
 
 
+def DrawCursor(elt, offset):
+    x = elt.x + offset
+    return DrawLine(x, elt.y, x, elt.y + elt.height, "red", 1)
+
+
 class BlockLayout:
     def __init__(self, node, parent, previous, frame):
         self.node = node
@@ -453,6 +458,15 @@ class BlockLayout:
             rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
+
+        if self.node.is_focused and "contenteditable" in self.node.attributes:
+            text_nodes = [
+                t for t in tree_to_list(self.node, []) if isinstance(t, TextLayout)
+            ]
+            if text_nodes:
+                cmds.append(DrawCursor(text_nodes[-1], text_nodes[-1].width))
+            else:
+                cmds.append(DrawCursor(self, 0))
         # if self.layout_mode() == "inline":
         #     for x, y, word, font, color in self.display_list:
         #         cmds.append(DrawText(x, y, word, font, color))

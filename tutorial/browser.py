@@ -68,6 +68,8 @@ def mainloop(browser):
                     browser.handle_enter()
                 elif event.key.keysym.sym == sdl2.SDLK_DOWN:
                     browser.handle_down()
+                elif event.key.keysym.sym == sdl2.SDLK_UP:
+                    browser.handle_up()
                 elif event.key.keysym.sym == sdl2.SDLK_TAB:
                     browser.handle_tab()
                 elif (
@@ -460,7 +462,7 @@ class Browser:
         else:
             canvas.clear(skia.ColorWHITE)
 
-        tab_offset = self.chrome.bottom - self.active_tab.scroll
+        tab_offset = self.chrome.bottom - self.active_tab_scroll
         canvas.save()
         canvas.translate(0, tab_offset)
         for item in self.draw_list:
@@ -524,7 +526,7 @@ class Browser:
 
     def new_tab(self, url):
         self.lock.acquire(blocking=True)
-        self.new_tab_internal(url)
+        self.new_tab_internal(URL(url) if isinstance(url, str) else url)
         self.lock.release()
 
     def new_tab_internal(self, url):

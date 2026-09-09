@@ -308,17 +308,26 @@ class Frame:
         self.scroll_changed_in_frame = True
 
     def keypress(self, char):
-        if self.focus:
-            if self.js.dispatch_event("keydown", self.focus, self.window_id):
+        if self.tab.focus and self.tab.focus.tag == "input":
+            if not "value" in self.tab.focus.attributes:
+                self.activate_element(self.tab.focus)
+            
+            if self.js.dispatch_event("keydown", self.tab.focus, self.window_id):
                 return
-            if self.focus.tag == "input":
-                if not "value" in self.focus.attributes:
-                    self.activate_element(self.tab.focus)
-                self.focus.attributes["value"] = (
-                    self.focus.attributes.get("value", "") + char
-                )
-                self.set_needs_render()
-                # self.render()
+            
+            self.tab.focus.attributes["value"] += char
+            self.set_needs_render()
+        elif self.tab.focus and "contenteditable" in self.tab.focus.attributes:
+            text_nodes = [
+                i for i in tree_to_list(self.tab.focus, []) if isinstance(i, Text)
+            ]
+            if text_nodes:
+                last_text = text_nodes[-1]
+            else:
+                last_text = Text("", self.tab.focus)
+                self.tab.focus.children.append(last_text)
+            last_text.text += char
+            self.set_needs_render()
 
     def clamp_scroll(self, scroll):
         height = math.ceil(self.document.height + 2 * VSTEP)

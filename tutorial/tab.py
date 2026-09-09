@@ -93,7 +93,8 @@ class Tab:
                         self.composited_updates.append(node)
                         self.set_needs_paint()
 
-            need_composite = self.needs_style or self.needs_layout
+            if frame.needs_style or frame.needs_layout:
+                need_composite = True
 
         self.render()
 
