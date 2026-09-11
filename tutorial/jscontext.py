@@ -147,7 +147,7 @@ class JSContext:
             raise Exception("Cross-origin XML request not allowed")
 
         def run_load():
-            headers, response = full_url.request(self.tab.url, body)
+            headers, response = full_url.request(frame.url, body)
             response = response.decode("utf8", "replace")
             task = Task(self.dispatch_xhr_load, response, handle, window_id)
             self.tab.task_runner.schedule_task(task)

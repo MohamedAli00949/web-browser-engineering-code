@@ -279,8 +279,11 @@ class DocumentLayout:
 
     def layout(self, width, zoom):
         self.zoom = zoom
-        child = BlockLayout(self.node, self, None, self.frame)
-        self.children.append(child)
+        if not self.children:
+            child = BlockLayout(self.node, self, None, self.frame)
+        else:
+            child = self.children[0]
+        self.children = [child]
 
         self.width = width - 2 * dpx(HSTEP, self.zoom)
         self.x = dpx(HSTEP, self.zoom)
@@ -478,6 +481,7 @@ class BlockLayout:
         self.add_inline_child(node, w, InputLayout, self.frame)
 
     def layout(self):
+        self.children = []
         self.zoom = self.parent.zoom
         self.x = self.parent.x
         self.width = self.parent.width
