@@ -329,6 +329,12 @@ class Frame:
                 last_text = Text("", self.tab.focus)
                 self.tab.focus.children.append(last_text)
             last_text.text += char
+
+            obj = self.tab.focus.layout_object
+            while not isinstance(obj, BlockLayout):
+                obj = obj.parent
+            obj.children_dirty = True
+
             self.set_needs_render()
 
     def clamp_scroll(self, scroll):

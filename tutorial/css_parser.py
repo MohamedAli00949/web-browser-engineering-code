@@ -445,6 +445,7 @@ class BlockLayout:
         self.height = None
 
         self.frame = frame
+        self.children_dirty = True
 
     def self_rect(self):
         return skia.Rect.MakeXYWH(
@@ -452,6 +453,7 @@ class BlockLayout:
         )
 
     def paint(self):
+        assert not self.children_dirty
         cmds = []
 
         bgcolor = self.node.style.get("background-color", "transparent")
@@ -493,18 +495,23 @@ class BlockLayout:
 
         mode = self.layout_mode()
         if mode == "block":
-            previous = None
-            for child in self.node.children:
-                next = BlockLayout(child, self, previous, self.frame)
-                self.children.append(next)
-                previous = next
+            if self.children_dirty:
+                previous = None
+                for child in self.node.children:
+                    next = BlockLayout(child, self, previous, self.frame)
+                    self.children.append(next)
+                    previous = next
+                self.children_dirty = False
         else:
             self.new_line()
             self.recurse(self.node)
+            self.children_dirty = False
 
+        assert not self.children_dirty
         for child in self.children:
             child.layout()
 
+        assert not self.children_dirty
         self.height = sum([child.height for child in self.children])
 
     def recurse(self, node):
