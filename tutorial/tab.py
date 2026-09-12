@@ -89,11 +89,12 @@ class Tab:
                 for property_name, animation in node.animations.items():
                     value = animation.animate()
                     if value:
-                        node.style[property_name] = value
+                        node.style[property_name].set(value)
                         self.composited_updates.append(node)
                         self.set_needs_paint()
 
-            need_composite = self.needs_style or self.needs_layout
+            if frame.needs_style or frame.needs_layout:
+                need_composite = True
 
         self.render()
 
@@ -126,7 +127,7 @@ class Tab:
             self.root_frame.url,
             scroll,
             root_frame_focused,
-            math.ceil(self.root_frame.document.height),
+            math.ceil(self.root_frame.document.height.get()),
             self.display_list,
             composited_updates,
             self.accessibility_tree,
@@ -211,7 +212,9 @@ class Tab:
 
         if self.needs_paint:
             self.display_list = []
+            self.browser.measure.time('paint')
             paint_tree(self.root_frame.document, self.display_list)
+            self.browser.measure.stop('paint')
             self.needs_paint = False
 
         self.browser.measure.stop("render")
@@ -247,11 +250,15 @@ class Tab:
         else:
             self.zoom *= 1 / 1.1
             self.scroll *= 1 / 1.1
+        for id, frame in self.window_id_to_frame.items():
+            frame.document.zoom.mark()
         self.scroll_changed_in_tab = True
         self.set_needs_render_all_frames()
 
     def reset_zoom(self):
         self.scroll /= self.zoom
         self.zoom = 1
+        for id, frame in self.window_id_to_frame.items():
+            frame.document.zoom.mark()
         self.scroll_changed_in_tab = True
         self.set_needs_render_all_frames()

@@ -58,22 +58,29 @@ def dpx(css_px, zoom):
     return css_px * zoom
 
 
-def font(style, zoom):
-    weight = style["font-weight"]
-    variant = style["font-style"]
-    size = float(style["font-size"][:-2]) * 0.75
+def font(style, zoom, notify):
+    weight = style["font-weight"].read(notify)
+    variant = style["font-style"].read(notify)
+    try:
+        size = float(style["font-size"].read(notify)[:-2]) * 0.75
+    except:
+        size = 16
     font_size = dpx(size, zoom)
 
     return get_font(font_size, weight, variant)
+
 
 def get_tabindex(node):
     tabindex = int(node.attributes.get("tabindex", "9999999"))
     return 9999999 if tabindex == 0 else tabindex
 
+
 def is_focusable(node):
     if get_tabindex(node) < 0:
         return False
     elif "tabindex" in node.attributes:
+        return True
+    elif "contenteditable" in node.attributes:
         return True
     else:
         return node.tag in ["input", "button", "a"]
@@ -136,7 +143,6 @@ def absolute_to_local(display_item, rect):
     return rect
 
 
-
 def cascade_priority(rule):
     media, selector, body = rule
     return selector.priority
@@ -156,10 +162,11 @@ def map_translation(rect, translation, reversed=False):
 
 
 def absolute_bounds_for_obj(obj):
-    rect = skia.Rect.MakeXYWH(obj.x, obj.y, obj.width, obj.height)
+    rect = skia.Rect.MakeXYWH(
+        obj.x.get(), obj.y.get(), obj.width.get(), obj.height.get())
     cur = obj.node
     while cur:
-        rect = map_translation(rect, parse_transform(cur.style.get("transform", "")))
+        rect = map_translation(rect, parse_transform(cur.style['transform'].get()))
         cur = cur.parent
     return rect
 
@@ -167,6 +174,7 @@ def absolute_bounds_for_obj(obj):
 def parse_outline(outline_str):
     if not outline_str:
         return None
+    
     values = outline_str.split(" ")
     if len(values) != 3:
         return None
@@ -182,3 +190,8 @@ def parse_transform(transform_str):
     right_paren = transform_str.find(")")
     x_px, y_px = transform_str[left_paren + 1 : right_paren].split(",")
     return (float(x_px.strip()[:-2]), float(y_px.strip()[:-2]))
+
+
+def dirty_style(node):
+    for property, value in node.style.items():
+        value.mark()

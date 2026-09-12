@@ -1,11 +1,13 @@
 from iframe_layout import *
+from constants import *
 
 class Text:
     def __init__(self, text, parent):
         self.text = text
         self.children = []
         self.parent = parent
-        self.style = {}
+        # self.style = ProtectedField(self, "style")
+        self.style = None
         self.animations = {}
         self.is_focused = False
         self.layout_object = None
@@ -21,7 +23,13 @@ class Element:
         self.parent = parent
         self.attributes = attributes
         self.is_focused = False
-        self.style = {}
+        # self.style = ProtectedField(self, "style")
+        # self.style = {}
+        # self.style = dict([
+        #     (property, ProtectedField(self, property))
+        #     for property in CSS_PROPERTIES
+        # ])
+        self.style = None
         self.animations = {}
         self.layout_object = None
 
@@ -35,14 +43,18 @@ def print_tree(node, indent=0):
         print_tree(child, indent + 2)
 
 
-def paint_tree(layout_object, display_list):
+def paint_tree(layout_object, display_list):  # done
     cmds = layout_object.paint()
 
     if isinstance(layout_object, IframeLayout) and layout_object.node.frame and layout_object.node.frame.loaded:
         paint_tree(layout_object.node.frame.document, cmds)
     else:
-        for child in layout_object.children:
-            paint_tree(child, cmds)
+        if isinstance(layout_object.children, ProtectedField):
+            for child in layout_object.children.get():
+                paint_tree(child, cmds)
+        else:
+            for child in layout_object.children:
+                paint_tree(child, cmds)
 
     cmds = layout_object.paint_effects(cmds)
     display_list.extend(cmds)
@@ -50,7 +62,12 @@ def paint_tree(layout_object, display_list):
 
 def tree_to_list(tree, list):
     list.append(tree)
-    for child in tree.children:
+    children = tree.children
+
+    if isinstance(children, ProtectedField):
+        children = children.get()
+
+    for child in children:
         tree_to_list(child, list)
 
     return list

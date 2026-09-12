@@ -73,18 +73,24 @@ class JSContext:
             self.tab.browser.measure.stop("script-load")
             print("Script: ", script, "crashed: ", e)
 
-    def setAttribute(self, handle, attr, value, window_id):
+    def setAttribute(self, handle, attr, value, window_id): # done
         frame = self.tab.window_id_to_frame[window_id]
         self.throw_if_cross_origin(frame)
         elt = self.handle_to_node[handle]
+        obj = elt.layout_object
+        if isinstance(obj, IframeLayout) or isinstance(obj, ImageLayout):
+            if attr == "width" or attr == "height":
+                obj.width.mark()
+                obj.height.mark()
         elt.attributes[attr] = value
         self.tab.set_needs_render_all_frames()
 
-    def style_set(self, handle, s, window_id):
+    def style_set(self, handle, s, window_id): # done
         frame = self.tab.window_id_to_frame[window_id]
         self.throw_if_cross_origin(frame)
         elt = self.handle_to_node[handle]
         elt.attributes["style"] = s
+        dirty_style(elt)
         frame.set_needs_render()
 
     def querySelectorAll(self, selector_text, window_id):
@@ -122,7 +128,7 @@ class JSContext:
             return False  # allow default behavior to continue
         return not do_default
 
-    def innerHTML_set(self, handle, s, window_id):
+    def innerHTML_set(self, handle, s, window_id): # done
         frame = self.tab.window_id_to_frame[window_id]
         self.throw_if_cross_origin(frame)
         doc = HTMLParser("<html><body>" + s + "</body></html>").parse()
@@ -133,6 +139,13 @@ class JSContext:
 
         for child in elt.children:
             child.parent = elt
+
+        obj = elt.layout_object
+        if obj:
+            while not isinstance(obj, BlockLayout):
+                obj = obj.parent
+
+            obj.children.mark()
 
         frame.set_needs_render()
 
@@ -147,7 +160,7 @@ class JSContext:
             raise Exception("Cross-origin XML request not allowed")
 
         def run_load():
-            headers, response = full_url.request(self.tab.url, body)
+            headers, response = full_url.request(frame.url, body)
             response = response.decode("utf8", "replace")
             task = Task(self.dispatch_xhr_load, response, handle, window_id)
             self.tab.task_runner.schedule_task(task)
