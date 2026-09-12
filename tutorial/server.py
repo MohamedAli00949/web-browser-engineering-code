@@ -80,7 +80,7 @@ def do_request(session, method, url, headers, body):
         return "200 OK", show_comments(session, out)
     elif method == "GET" and url == "/login":
         return "200 OK", login_form(session)
-    elif method == "POST" and url == "/":
+    elif method == "POST" and url == "/login":
         params = form_decode(body)
         return do_login(session, params)
     elif method == "POST" and url == "/add":
@@ -97,8 +97,20 @@ def do_request(session, method, url, headers, body):
                 return "200 OK", f.read()
         except FileNotFoundError:
             return "404 Not Found", not_found(url, method)
+    elif method == "GET" and url == "/count":
+        return "200 OK", show_count(session, out)
     else:
         return "404 Not Found", not_found(url, method, out)
+
+def show_count(session, out):
+    out = "<!doctype html>"
+    out += "<div>"
+    out += " Let's count up to 99!"
+    out += "</div>"
+    out += "<div>Output</div>"
+    out += "<script src=/eventloop.js></script>"
+
+    return out
 
 def show_comments(session, out):
     # ...

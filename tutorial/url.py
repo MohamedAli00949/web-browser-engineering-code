@@ -201,6 +201,8 @@ class URL:
             response = s.makefile("rb")
             statusLine = response.readline().decode("utf8")
 
+            print("Status line: ", statusLine)
+
             version, status, explanation = statusLine.split(" ", 2)
 
             response_headers = {}
@@ -251,8 +253,13 @@ class URL:
 
             content = content.decode("utf8", errors="replace")
 
-            # Always close and remove from cache for POST, or if server requests it
-            if response_headers.get("connection", "").lower() == "close" or method == "POST":
+            should_close = (
+                method == "POST"
+                or response_headers.get("connection", "").lower() == "close"
+                or (version == "HTTP/1.0" and response_headers.get("connection", "").lower() != "keep-alive")
+            )
+
+            if should_close:
                 s.close()
                 URL.socket_cache.pop(socket_key, None)
             else:
