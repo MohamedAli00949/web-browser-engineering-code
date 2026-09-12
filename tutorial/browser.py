@@ -181,6 +181,7 @@ class Browser:
         self.pending_hover = None
         self.hovered_a11y_node = None
         self.needs_speak_hovered_node = False
+        self.root_frame_focused = False
 
     def handle_hover(self, event):
         if not self.accessibility_is_on or not self.accessibility_tree:
@@ -323,18 +324,20 @@ class Browser:
             self.active_tab_url = data.url
             if data.scroll != None:
                 self.active_tab_scroll = data.scroll
+            self.root_frame_focused = data.root_frame_focused
             self.active_tab_height = data.height
             if data.display_list:
                 self.active_tab_display_list = data.display_list
             self.animation_timer = None
             self.composited_updates = data.composited_updates
+            self.accessibility_tree = data.accessibility_tree
+            if self.accessibility_tree:
+                self.set_needs_accessibility()
             if self.composited_updates == None:
                 self.composited_updates = {}
                 self.set_needs_composite()
             else:
                 self.set_needs_draw()
-            self.tab_focus = data.focus
-        self.accessibility_tree = data.accessibility_tree
         self.lock.release()
 
     def set_needs_draw(self):
@@ -358,27 +361,36 @@ class Browser:
     def handle_up(self):
         self.lock.acquire(blocking=True)
 
-        if not self.active_tab_height:
+        if self.root_frame_focused:
+            if not self.active_tab_height:
+                self.lock.release()
+                return
+
+            self.active_tab_scroll = self.clamp_scroll(self.active_tab_scroll - SCROLL_STEP)
+
+            self.set_needs_raster()
+            self.needs_animation_frame = True
             self.lock.release()
             return
 
-        self.active_tab_scroll = self.clamp_scroll(self.active_tab_scroll - SCROLL_STEP)
-
-        self.set_needs_raster()
-        self.needs_animation_frame = True
+        task = Task(self.active_tab.scrollup)
+        self.active_tab.task_runner.schedule_task(task)
         self.lock.release()
 
     def handle_down(self):
         self.lock.acquire(blocking=True)
-
-        if not self.active_tab_height:
+        if self.root_frame_focused:
+            if not self.active_tab_height:
+                self.lock.release()
+                return
+            self.active_tab_scroll = self.clamp_scroll(self.active_tab_scroll + SCROLL_STEP)
+            self.set_needs_draw()
+            self.needs_animation_frame = True
             self.lock.release()
             return
 
-        self.active_tab_scroll = self.clamp_scroll(self.active_tab_scroll + SCROLL_STEP)
-
-        self.set_needs_raster()
-        self.needs_animation_frame = True
+        task = Task(self.active_tab.scrolldown)
+        self.active_tab.task_runner.schedule_task(task)
         self.lock.release()
 
     def handle_click(self, e):
@@ -448,11 +460,8 @@ class Browser:
         else:
             canvas.clear(skia.ColorWHITE)
 
-        # tab_rect = skia.Rect.MakeLTRB(
-        #     0, self.chrome.bottom, WIDTH, HEIGHT)
         tab_offset = self.chrome.bottom - self.active_tab.scroll
         canvas.save()
-        # canvas.clipRect(tab_rect)
         canvas.translate(0, tab_offset)
         for item in self.draw_list:
             item.execute(canvas)
@@ -498,11 +507,15 @@ class Browser:
 
     def set_active_tab(self, tab):
         self.active_tab = tab
+        task = Task(self.active_tab.set_dark_mode, self.dark_mode)
+        self.active_tab.task_runner.schedule_task(task)
+
+        task = Task(self.active_tab.set_needs_render_all_frames)
+        self.active_tab.task_runner.schedule_task(task)
+
         self.clear_data()
         self.needs_animation_frame = True
         self.animation_timer = None
-        task = Task(self.active_tab.set_dark_mode, self.dark_mode)
-        self.active_tab.task_runner.schedule_task(task)
 
     def go_back(self):
         task = Task(self.active_tab.go_back)

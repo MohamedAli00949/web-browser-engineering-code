@@ -60,7 +60,9 @@ def parse_cache_control(response_headers):
 
     return cacheable, max_age
 
+
 COOKIE_JAR = {}
+
 
 class URL:
     socket_cache = {}
@@ -69,7 +71,7 @@ class URL:
     def __init__(self, url):
         if url.startswith("view-source:"):
             self.scheme = "view-source"
-            self.inner_url = URL(url[len("view-source:"):])
+            self.inner_url = URL(url[len("view-source:") :])
 
             self.host = None
             self.port = None
@@ -78,7 +80,7 @@ class URL:
         elif url.startswith("data:"):
             self.scheme = "data"
 
-            url = url[len("data:"):]
+            url = url[len("data:") :]
             self.mimetype, self.data = url.split(",", 1)
 
             self.host = None
@@ -170,9 +172,6 @@ class URL:
             request = f"{method} {self.path} HTTP/1.1\r\n"
             request += f"Host: {self.host}\r\n"
             request += "Connection: close\r\n"
-            request += "User-Agent: MoBrowserFromWebBrowserEngineeringBook/1.0\r\n"
-            request += "Accept-Encoding: identity\r\n"
-
             if self.host in COOKIE_JAR:
                 cookie, params = COOKIE_JAR[self.host]
                 allow_cookie = True
@@ -182,27 +181,20 @@ class URL:
                 if allow_cookie:
                     request += f"Cookie: {cookie}\r\n"
                     print("Cookie: ", cookie, "for host: ", self.host, COOKIE_JAR)
+            request += "User-Agent: MoBrowserFromWebBrowserEngineeringBook/1.0\r\n"
+            request += "Accept-Encoding: identity\r\n"
 
             if payload:
                 payload_encoded = payload.encode("utf8")
-                request += "Content-Type: application/x-www-form-urlencoded\r\n"
+                # request += "Content-Type: application/x-www-form-urlencoded\r\n"
                 request += f"Content-Length: {len(payload_encoded)}\r\n"
-                request += "\r\n"
-                s.send(request.encode("utf8") + payload_encoded)
-            else:
-                request += "\r\n"
-                try:
-                    s.send(request.encode("utf8"))
-                except (ConnectionAbortedError, BrokenPipeError, OSError):
-                    s.close()
-                    URL.socket_cache.pop(socket_key, None)
-                    return self.request(referrer, payload, redirects)
+            request += "\r\n" + (payload or "")
+            s.send(request.encode("utf8"))
 
-            response = s.makefile("rb")
+            response = s.makefile("b")
+
             statusLine = response.readline().decode("utf8")
-
             print("Status line: ", statusLine)
-
             version, status, explanation = statusLine.split(" ", 2)
 
             response_headers = {}
@@ -225,7 +217,7 @@ class URL:
                     redirect_url = f"{self.scheme}://{self.host}{redirect_url}"
 
                 return URL(redirect_url).request(redirects=redirects + 1)
-            
+
             if "set-cookie" in response_headers:
                 cookie = response_headers["set-cookie"]
                 params = {}
@@ -251,12 +243,13 @@ class URL:
             if response_headers.get("content-encoding") == "gzip":
                 content = gzip.decompress(content)
 
-            content = content.decode("utf8", errors="replace")
-
             should_close = (
                 method == "POST"
                 or response_headers.get("connection", "").lower() == "close"
-                or (version == "HTTP/1.0" and response_headers.get("connection", "").lower() != "keep-alive")
+                or (
+                    version == "HTTP/1.0"
+                    and response_headers.get("connection", "").lower() != "keep-alive"
+                )
             )
 
             if should_close:
@@ -270,7 +263,11 @@ class URL:
                 cacheable, max_age = parse_cache_control(response_headers)
                 if cacheable:
                     expires = (time.time() + max_age) if max_age is not None else None
-                    URL.response_cache[key] = {"content": content, "headers": response_headers, "expires": expires}
+                    URL.response_cache[key] = {
+                        "content": content,
+                        "headers": response_headers,
+                        "expires": expires,
+                    }
 
             return response_headers, content
 
