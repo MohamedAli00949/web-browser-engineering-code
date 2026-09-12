@@ -3,6 +3,8 @@ class Text:
         self.text = text
         self.children = []
         self.parent = parent
+        self.style = {}
+        self.animations = {}
 
     def __repr__(self):
         return repr(self.text)
@@ -15,10 +17,11 @@ class Element:
         self.parent = parent
         self.attributes = attributes
         self.is_focused = False
+        self.style = {}
+        self.animations = {}
 
     def __repr__(self):
         return "<" + self.tag + ">"
-
 
 def print_tree(node, indent=0):
     print(" " * indent, node)

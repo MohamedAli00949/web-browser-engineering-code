@@ -10,7 +10,14 @@ Object.defineProperty(Node.prototype, "innerHTML", {
   set: function (html) {
     call_python("innerHTML", this.handle, html.toString());
   }
-})
+});
+
+Object.defineProperty(Node.prototype, 'style', {
+  set: function (s) {
+    call_python("style_set", this.handle, s.toString());
+  }
+});
+
 
 LISTENERS = {}
 Node.prototype.addEventListener = function (type, listener) {

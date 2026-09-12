@@ -4,6 +4,28 @@ from constants import *
 from html_parser import Text
 from utils import *
 
+def parse_transition(value):
+    properties = {}
+    if not value: return properties
+    for item in value.split(","):
+        property, duration = item.split(" ", 1)
+        frames = int(float(duration[:-1]) / REFRESH_RATE_SEC)
+        properties[property] = frames
+    return properties
+
+def diff_styles(old_style, new_style):
+    transitions = {}
+    for property, num_frames in \
+        parse_transition(new_style.get("transition")).items():
+        if property not in old_style: continue
+        if property not in new_style: continue
+        old_value = old_style[property]
+        new_value = new_style[property]
+        if old_value == new_value: continue
+        transitions[property] = \
+            (old_value, new_value, num_frames)
+
+    return transitions
 
 class CSSParser:
     def __init__(self, s):
@@ -26,23 +48,29 @@ class CSSParser:
         return self.s[start : self.i]
 
     def literal(self, literal):
-        if not (self.i < len(self.s)) and self.s[self.i] == literal:
+        if not (self.i < len(self.s) and self.s[self.i] == literal):
             raise Exception("Parsing error")
         self.i += 1
 
-    def pair(self):
+    def until_chars(self, chars):
+        start = self.i
+        while self.i < len(self.s) and self.s[self.i] not in chars:
+            self.i += 1
+        return self.s[start : self.i]
+
+    def pair(self, until):
         prop = self.word()
         self.whitespace()
         self.literal(":")
         self.whitespace()
-        value = self.word()
-        return prop.casefold(), value
+        value = self.until_chars(until)
+        return prop.casefold(), value.strip()
 
     def body(self):
         pairs = {}
         while self.i < len(self.s) and self.s[self.i] != "}":
             try:
-                prop, value = self.pair()
+                prop, value = self.pair([";", "}"])
                 pairs[prop.casefold()] = value
                 self.whitespace()
                 self.literal(";")
@@ -120,7 +148,8 @@ class DescendantSelector:
         return False
 
 
-def style(node, rules):
+def style(node, rules, tab):
+    old_style = node.style
     node.style = {}
 
     for property, default_value in INHERITED_PROPERTIES.items():
@@ -151,12 +180,139 @@ def style(node, rules):
         node.style["font-size"] = str(node_pct * parent_px) + "px"
 
     for child in node.children:
-        style(child, rules)
+        style(child, rules, tab)
+
+    if old_style:
+        transitions = diff_styles(old_style, node.style)
+        for property, (old_value, new_value, num_frames) in transitions.items():
+            if property == "opacity":
+                tab.set_needs_render()
+                animation = NumericAnimation(old_value, new_value, num_frames)
+                node.animations[property] = animation
+                node.style[property] = animation.animate()
 
 
 def cascade_priority(rule):
     selector, body = rule
     return selector.priority
+
+
+def map_translation(rect, translation, reversed=False):
+    if not translation:
+        return rect
+    else:
+        x, y = translation
+        matrix = skia.Matrix()
+        if reversed:
+            matrix.setTranslate(-x, -y)
+        else:
+            matrix.setTranslate(x, y)
+        return matrix.mapRect(rect)
+
+
+def absolute_bounds_for_obj(obj):
+    rect = skia.Rect.MakeXYWH(obj.x, obj.y, obj.width, obj.height)
+    cur = obj.node
+    while cur:
+        rect = map_translation(rect, parse_transform(cur.style.get("transform", "")))
+        cur = cur.parent
+    return rect
+
+
+class NumericAnimation:
+    def __init__(self, old_value, new_value, num_frames):
+        self.old_value = float(old_value)
+        self.new_value = float(new_value)
+        self.num_frames = num_frames
+
+        self.frame_count = 1
+        total_change = self.new_value - self.old_value
+        self.change_per_frame = total_change / num_frames
+
+    def animate(self):
+        self.frame_count += 1
+        if self.frame_count >= self.num_frames:
+            return
+        current_value = self.old_value + self.change_per_frame * self.frame_count
+        return str(current_value)
+
+
+class PaintCommand:
+    def __init__(self, rect):
+        self.rect = rect
+        self.children = []
+
+
+class DrawCompositedLayer(PaintCommand):
+    def __init__(self, composited_layer):
+        self.composited_layer = composited_layer
+        super().__init__(composited_layer.composited_bounds())
+
+    def execute(self, canvas):
+        layer = self.composited_layer
+        if not layer.surface: return
+        bounds = layer.composited_bounds()
+        layer.surface.draw(canvas, bounds.left(), bounds.top())
+
+    def __repr__(self):
+        return "DrawCompositedLayer()"
+
+
+class CompositedLayer:
+    def __init__(self, skia_context, display_item):
+        self.skia_context = skia_context
+        self.surface = None
+        self.display_items = [display_item]
+
+    def composited_bounds(self):
+        rect = skia.Rect.MakeEmpty()
+        for item in self.display_items:
+            rect.join(absolute_to_local(item, local_to_absolute(item, item.rect)))
+        rect.outset(1, 1)
+        return rect
+
+    def raster(self):
+        bounds = self.composited_bounds()
+        if bounds.isEmpty(): return
+        irect = bounds.roundOut()
+
+        if not self.surface:
+            self.surface = skia.Surface.MakeRenderTarget(
+                self.skia_context,
+                skia.Budgeted.kNo,
+                skia.ImageInfo.MakeN32Premul(irect.width(), irect.height()),
+            )
+            if not self.surface:
+                self.surface = skia.Surface(irect.width(), irect.height())
+            assert self.surface
+
+        canvas = self.surface.getCanvas()
+
+        canvas.clear(skia.ColorTRANSPARENT)
+        canvas.save()
+        canvas.translate(-bounds.left(), -bounds.top())
+        for item in self.display_items:
+            item.execute(canvas)
+        canvas.restore()
+
+        if SHOW_COMPOSITED_LAYER_BORDERS:
+            border_rect = skia.Rect.MakeXYWH(
+                1, 1, irect.width() - 2, irect.height() - 2
+            )
+            DrawOutline(border_rect, "red", 1).execute(canvas)
+
+    def add(self, display_item):
+        self.display_items.append(display_item)
+
+    def can_marge(self, display_item):
+        return display_item.parent == self.display_items[0].parent
+
+    def absolute_bounds(self):
+        rect = skia.Rect.MakeEmpty()
+        for item in self.display_items:
+            rect.join(local_to_absolute(item, item.rect))
+        return rect
+
 
 class DocumentLayout:
     def __init__(self, node):
@@ -185,7 +341,7 @@ class DocumentLayout:
         return cmds
 
 
-class DrawText:
+class DrawText(PaintCommand):
     def __init__(self, x1, y1, text, font, color):
         self.top = y1
         self.left = x1
@@ -194,49 +350,73 @@ class DrawText:
         self.right = x1 + font.measureText(text)
         self.color = color
         self.bottom = y1 + linespace(font)
+        super().__init__(skia.Rect.MakeLTRB(x1, y1, self.right, self.bottom))
 
         self.rect = skia.Rect.MakeLTRB(x1, y1, self.right, self.bottom)
 
-    def execute(self, scroll, canvas):
+    def execute(self, canvas):
         paint = skia.Paint(
             AntiAlias=True,
-            Color=parse_color(self.color),
+            Color=parse_color(self.color)
         )
-        baseline = self.top - scroll - self.font.getMetrics().fAscent
-        canvas.drawString(self.text, float(self.left), baseline, self.font, paint)
+        baseline = self.rect.top() - self.font.getMetrics().fAscent
+        canvas.drawString(self.text, float(self.rect.left()), baseline,
+            self.font, paint)
 
 
-class DrawRRect:
+class DrawRRect(PaintCommand):
     def __init__(self, rect, radius, color):
+        super().__init__(rect)
         self.rect = rect  # FIX: store rect so tab.draw can call cmd.rect.top()
         self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
         self.color = color
 
-    def execute(self, scroll, canvas):
-        sk_color = parse_color(self.color)
-        moved = self.rect.makeOffset(0, -scroll)
-        rrect = skia.RRect.MakeRectXY(moved, self.rrect.getSimpleRadii().fX, self.rrect.getSimpleRadii().fY)
-        canvas.drawRRect(rrect, skia.Paint(Color=sk_color))
+    def execute(self, canvas):
+        paint = skia.Paint(
+            Color=parse_color(self.color),
+        )
+        canvas.drawRRect(self.rrect, paint)
+
+    def __repr__(self):
+        return ("DrawRect(rrect={} color={})").format(str(self.rrect), self.color)
 
 
-class DrawOutline:
+class DrawRect(PaintCommand):
+    def __init__(self, rect, radius, color):
+        self.rect = rect  # FIX: store rect so tab.draw can call cmd.rect.top()
+        super().__init__(rect)
+        self.rrect = skia.RRect.MakeRectXY(rect, radius, radius)
+        self.color = color
+
+    def execute(self, canvas):
+        paint = skia.Paint(
+            Color=parse_color(self.color),
+        )
+        canvas.drawRect(self.rect, paint)
+
+    def __repr__(self):
+        return ("DrawRect(rect={} color={})").format(str(self.rect), self.color)
+
+
+class DrawOutline(PaintCommand):
     def __init__(self, rect, color, thickness):
+        super().__init__(rect)
         self.rect = rect
         self.color = color
         self.thickness = thickness
 
-    def execute(self, scroll, canvas):
+    def execute(self, canvas):
         paint = skia.Paint(
             Color=parse_color(self.color),
             StrokeWidth=self.thickness,
             Style=skia.Paint.kStroke_Style,
         )
+        canvas.drawRect(self.rect, paint)
 
-        canvas.drawRect(self.rect.makeOffset(0, -scroll), paint)
 
-
-class DrawLine:
+class DrawLine(PaintCommand):
     def __init__(self, x1, y1, x2, y2, color, thickness):
+        super().__init__(skia.Rect.MakeLTRB(x1, y1, x2, y2))
         self.x1 = x1
         self.y1 = y1
         self.x2 = x2
@@ -245,16 +425,30 @@ class DrawLine:
         self.color = color
         self.thickness = thickness
 
-    def execute(self, scroll, canvas):
-        path = skia.Path().moveTo(self.x1, self.y1 - scroll).lineTo(self.x2, self.y2 - scroll)
-
+    def execute(self, canvas):
+        path = skia.Path().moveTo(self.rect.left(), self.rect.top()) \
+                        .lineTo(self.rect.right(), self.rect.bottom())
         paint = skia.Paint(
             Color=parse_color(self.color),
             StrokeWidth=self.thickness,
             Style=skia.Paint.kStroke_Style,
         )
-
         canvas.drawPath(path, paint)
+
+class VisualEffect:
+    def __init__(self, rect, children, node=None):
+        self.rect = rect.makeOffset(0.0, 0.0)
+        self.children = children
+        for child in self.children:
+            self.rect.join(child.rect)
+        self.node = node
+        self.needs_compositing = any(
+            [
+                child.needs_compositing
+                for child in self.children
+                if isinstance(child, VisualEffect)
+            ]
+        )
 
 
 class TextLayout:
@@ -338,23 +532,22 @@ class InputLayout:
         bgcolor = self.node.style.get("background-color", "transparent")
 
         if bgcolor != "transparent":
-            radius = float(
-                self.node.style.get("border-radius", "0px")[:-2]
-            )
+            radius = float(self.node.style.get("border-radius", "0px")[:-2])
             rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
         if self.node.tag == "input":
             text = self.node.attributes.get("value", "")
-            if self.node.is_focused:
-                cx = self.x + self.font.measureText(text)
-                cmds.append(DrawLine(cx, self.y, cx, self.y + self.height, "black", 1))
         elif self.node.tag == "button":
             if len(self.node.children) == 1 and isinstance(self.node.children[0], Text):
                 text = self.node.children[0].text
-        else:
-            print("Ignoring HTML contents inside button")
-            text = ""
+            else:
+                print("Ignoring HTML contents inside button")
+                text = ""
+
+        if self.node.tag == "input" and self.node.is_focused:
+            cx = self.x + self.font.measureText(text)
+            cmds.append(DrawLine(cx, self.y, cx, self.y + self.height, "black", 1))
 
         color = self.node.style["color"]
         cmds.append(DrawText(self.x, self.y, text, self.font, color))
@@ -362,8 +555,10 @@ class InputLayout:
         return cmds
 
     def self_rect(self):
-        return skia.Rect.MakeLTRB(self.x, self.y, self.x + self.width, self.y + self.height)
-    
+        return skia.Rect.MakeLTRB(
+            self.x, self.y, self.x + self.width, self.y + self.height
+        )
+
     def should_paint(self):
         return True
 
@@ -424,17 +619,17 @@ class Opacity:
         for cmd in self.children:
             self.rect.join(cmd.rect)
 
-    def execute(self, scroll, canvas):
+    def execute(self, canvas):
         paint = skia.Paint(
-            Alphaf=self.opacity
+            Alphaf=self.opacity,
         )
-
         if self.opacity < 1:
             canvas.saveLayer(None, paint)
         for cmd in self.children:
-            cmd.execute(scroll, canvas)
+            cmd.execute(canvas)
         if self.opacity < 1:
             canvas.restore()
+
 
 def parse_blend_mode(blend_mode_str):
     if blend_mode_str == "multiply":
@@ -443,38 +638,100 @@ def parse_blend_mode(blend_mode_str):
         return skia.BlendMode.kDifference
     elif blend_mode_str == "destination-in":
         return skia.BlendMode.kDstIn
-    elif blend_mode_str == 'source-over':
+    elif blend_mode_str == "source-over":
         return skia.BlendMode.kSrcOver
     else:
         return skia.BlendMode.kSrcOver
-    
 
-class Blend:
-    def __init__(self, opacity, blend_mode, children):
+
+def local_to_absolute(display_item, rect):
+    while display_item.parent:
+        rect = display_item.parent.map(rect)
+        display_item = display_item.parent
+    return rect
+
+
+def absolute_to_local(display_item, rect):
+    parent_chain = []
+    while display_item.parent:
+        parent_chain.append(display_item.parent)
+        display_item = display_item.parent
+    for parent in reversed(parent_chain):
+        rect = parent.unmap(rect)
+    return rect
+
+
+class Blend(VisualEffect):
+    def __init__(self, opacity, blend_mode, node, children):
+        super().__init__(
+            skia.Rect.MakeEmpty(),
+            children,
+            node,
+        )
         self.opacity = opacity
         self.blend_mode = blend_mode
         self.should_save = self.blend_mode or self.opacity < 1
+        if self.should_save:
+            self.needs_compositing = True
         self.children = children
         self.rect = skia.Rect.MakeEmpty()
         for cmd in self.children:
             self.rect.join(cmd.rect)
 
-    def execute(self, scroll, canvas):
+    def execute(self, canvas):
         paint = skia.Paint(
-            Alphaf=self.opacity, 
+            Alphaf=self.opacity,
             BlendMode=parse_blend_mode(self.blend_mode)
         )
         if self.should_save:
             canvas.saveLayer(None, paint)
-        
         for cmd in self.children:
-            cmd.execute(scroll, canvas)
+            cmd.execute(canvas)
         if self.should_save:
             canvas.restore()
+
+    def map(self, rect):
+        if (
+            self.children
+            and isinstance(self.children[-1], Blend)
+            and self.children[-1].blend_mode == "destination-in"
+        ):
+            bounds = rect.makeOffset(0.0, 0.0)
+            bounds.intersect(self.children[-1].rect)
+            return bounds
+        else:
+            return rect
+
+    def unmap(self, rect):
+        return rect
+
+    def clone(self, child):
+        return Blend(self.opacity, self.blend_mode, self.node, [child])
+
+    def __repr__(self):
+        args = ""
+        if self.opacity < 1:
+            args += ", opacity={}".format(self.opacity)
+        if self.blend_mode:
+            args += ", blend_mode={}".format(self.blend_mode)
+        if not args:
+            args = ", <no-op>"
+        return "Blend({})".format(args[2:])
+
+
+def parse_transform(transform_str):
+    if transform_str.find("translate(") < 0:
+        return None
+    left_paren = transform_str.find("(")
+    right_paren = transform_str.find(")")
+    x_px, y_px = transform_str[left_paren + 1 : right_paren].split(",")
+    return (float(x_px.strip()[:-2]), float(y_px.strip()[:-2]))
+
 
 def paint_visual_effects(node, cmds, rect):
     opacity = float(node.style.get("opacity", "1.0"))
     blend_mode = node.style.get("mix-blend-mode")
+    translation = parse_transform(node.style.get("transform", ""))
 
     if node.style.get("overflow", "visible") == "clip":
         if not blend_mode:
@@ -483,15 +740,48 @@ def paint_visual_effects(node, cmds, rect):
     if node.style.get("overflow", "visible") == "clip":
         border_radius = float(node.style.get("border-radius", "0px")[0:-2])
         cmds.append(
-            Blend(1.0, "destination-in", [
-                    DrawRRect(rect, border_radius, "black")
-                ]
+            Blend(
+                1.0, "destination-in", None, [DrawRRect(rect, border_radius, "black")]
             )
         )
 
-    return [
-        Blend(opacity, blend_mode, cmds)
-    ]
+    blend_op = Blend(opacity, blend_mode, node, cmds)
+    node.blend_op = blend_op
+    return [Transform(translation, rect, node, [blend_op])]
+
+
+class Transform(VisualEffect):
+    def __init__(self, translation, rect, node, children):
+        super().__init__(rect, children, node)
+        self.self_rect = rect
+        self.translation = translation
+
+    def execute(self, canvas):
+        if self.translation:
+            (x, y) = self.translation
+            canvas.save()
+            canvas.translate(x, y)
+        for cmd in self.children:
+            cmd.execute(canvas)
+        if self.translation:
+            canvas.restore()
+
+    def map(self, rect):
+        return map_translation(rect, self.translation)
+
+    def unmap(self, rect):
+        return map_translation(rect, self.translation, True)
+
+    def clone(self, child):
+        return Transform(self.translation, self.self_rect, self.node, [child])
+
+    def __repr__(self):
+        if self.translation:
+            x, y = self.translation
+            return "Transform(translate({}, {}))".format(x, y)
+        else:
+            return "Transform(<no-op>)"
+
 
 class BlockLayout:
     def __init__(self, node, parent, previous):
@@ -516,7 +806,9 @@ class BlockLayout:
             child.layout()
 
     def self_rect(self):
-        return skia.Rect.MakeXYWH(self.x, self.y, self.x + self.width, self.y + self.height)
+        return skia.Rect.MakeXYWH(
+            self.x, self.y, self.x + self.width, self.y + self.height
+        )
 
     def paint(self):
         cmds = []
@@ -524,9 +816,7 @@ class BlockLayout:
         bgcolor = self.node.style.get("background-color", "transparent")
 
         if bgcolor != "transparent":
-            radius = float(
-                self.node.style.get("border-radius", "0px")[:-2]
-            )
+            radius = float(self.node.style.get("border-radius", "0px")[:-2])
             rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 

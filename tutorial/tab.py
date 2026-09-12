@@ -10,18 +10,15 @@ import math
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
 
+
 class CommitData:
-    def __init__(
-            self,
-            url,
-            scroll,
-            height,
-            display_list
-        ):
+    def __init__(self, url, scroll, height, display_list, composited_updates):
         self.url = url
         self.scroll = scroll
         self.height = height
         self.display_list = display_list
+        self.composited_updates = composited_updates
+
 
 class Tab:
     def __init__(self, browser, tab_height):
@@ -37,9 +34,13 @@ class Tab:
         self.task_runner.start_thread()
 
         self.need_render = False
+        self.needs_style = False
+        self.needs_layout = False
+        self.needs_paint = False
         self.loaded = False
         self.browser = browser
         self.scroll_changed_in_tab = False
+        self.composited_updates = []
 
         self.js = None
 
@@ -50,23 +51,37 @@ class Tab:
         self.js.interp.evaljs("__runRAFHandlers()")
         self.browser.measure.stop("script-runRAFHandlers")
 
+        for node in tree_to_list(self.nodes, []):
+            for property_name, animation in node.animations.items():
+                value = animation.animate()
+                if value:
+                    node.style[property_name] = value
+                    self.composited_updates.append(node)
+                    self.set_needs_paint()
+
+        need_composite = self.needs_style or self.needs_layout
+
         self.render()
 
         scroll = None
         if self.scroll_changed_in_tab:
             scroll = self.scroll
 
-        print("run_animation_frame: ", f"self.url: {self.url}, scroll: {scroll}, self.document.height: {self.document.height}, self.display_list: {self.display_list}")
-        document_height = math.ceil(self.document.height + 2*VSTEP)
+        composited_updates = None
+        if not need_composite:
+            composited_updates = {}
+            for node in self.composited_updates:
+                composited_updates[node] = node.blend_op
+        self.composited_updates = []
+
+        document_height = math.ceil(self.document.height + 2 * VSTEP)
         commit_data = CommitData(
-            self.url,
-            scroll,
-            document_height,
-            self.display_list
+            self.url, scroll, document_height, self.display_list, composited_updates
         )
         self.display_list = None
-        self.browser.commit(self, commit_data)
         self.scroll_changed_in_tab = False
+
+        self.browser.commit(self, commit_data)
 
     def scrollup(self):
         max_y = max(self.document.height + 2 * VSTEP + self.tab_height, 0)
@@ -78,17 +93,29 @@ class Tab:
 
     def raster(self, canvas, offset):
         print("raster: ", f"self.display_list: {self.display_list.pop()}")
-        if self.display_list is None: return
+        if self.display_list is None:
+            return
         for cmd in self.display_list:
-            print("raster: ", f"self.scroll: {self.scroll}, self.tab_height: {self.tab_height}")
+            print(
+                "raster: ",
+                f"self.scroll: {self.scroll}, self.tab_height: {self.tab_height}",
+            )
             if cmd.rect.top() > self.scroll + self.tab_height:
                 continue
             if cmd.rect.bottom() < self.scroll:
                 continue
-            cmd.execute(self.scroll - offset, canvas)
+            cmd.execute(canvas)
 
     def set_needs_render(self):
-        self.need_render = True
+        self.needs_style = True
+        self.browser.set_needs_animation_frame(self)
+
+    def set_needs_layout(self):
+        self.needs_layout = True
+        self.browser.set_needs_animation_frame(self)
+
+    def set_needs_paint(self):
+        self.needs_paint = True
         self.browser.set_needs_animation_frame(self)
 
     def load(self, url, payload=None):
@@ -112,17 +139,24 @@ class Tab:
 
         self.nodes = HTMLParser(body).parse()
         print(f"Parsed HTML, nodes: {len(tree_to_list(self.nodes, []))} nodes")
-        
-        if self.js: self.js.discarded = True
+
+        if self.js:
+            self.js.discarded = True
         self.js = JSContext(self)
-        scripts = [node.attributes["src"] for node in tree_to_list(self.nodes, []) if isinstance(node, Element) and node.tag == "script" and "src" in node.attributes]
+        scripts = [
+            node.attributes["src"]
+            for node in tree_to_list(self.nodes, [])
+            if isinstance(node, Element)
+            and node.tag == "script"
+            and "src" in node.attributes
+        ]
         for script in scripts:
             script_url = url.resolve(script)
             if not self.allowed_request(script_url):
                 print("Blocked script load:", script_url)
                 continue
-            
-            try: 
+
+            try:
                 headers, body = script_url.request(self.url, None)
                 self.js.run(script_url, body)
             except dukpy.JSRuntimeError as e:
@@ -131,12 +165,14 @@ class Tab:
 
         self.rules = DEFAULT_STYLE_SHEET.copy()
 
-        links = [node.attributes["href"]
-                    for node in tree_to_list(self.nodes, [])
-                    if isinstance(node, Element)
-                    and node.tag == "link"
-                    and node.attributes.get("rel") == "stylesheet"
-                    and "href" in node.attributes]
+        links = [
+            node.attributes["href"]
+            for node in tree_to_list(self.nodes, [])
+            if isinstance(node, Element)
+            and node.tag == "link"
+            and node.attributes.get("rel") == "stylesheet"
+            and "href" in node.attributes
+        ]
 
         for link in links:
             style_url = url.resolve(link)
@@ -154,7 +190,7 @@ class Tab:
         print("Tab.load: Completed")
 
     def clamp_scroll(self, scroll):
-        height = math.ceil(self.document.height + 2*VSTEP)
+        height = math.ceil(self.document.height + 2 * VSTEP)
         maxscroll = height - self.tab_height
         return max(0, min(scroll, maxscroll))
 
@@ -162,10 +198,11 @@ class Tab:
         self.render()
         self.focus = None
         y += self.scroll
+        loc_rect = skia.Rect.MakeXYWH(x, y, 1, 1)
         objs = [
             obj
             for obj in tree_to_list(self.document, [])
-            if obj.x <= x < obj.x + obj.width and obj.y <= y < obj.y + obj.height
+            if absolute_bounds_for_obj(obj).intersects(loc_rect)
         ]
 
         if not objs:
@@ -198,9 +235,15 @@ class Tab:
             elt = elt.parent
 
     def submit_form(self, elt):
-        if self.js.dispatch_event("submit", elt): return
-        inputs = [node for node in tree_to_list(elt, []) 
-                if isinstance(node, Element) and node.tag == "input" and "name" in node.attributes]
+        if self.js.dispatch_event("submit", elt):
+            return
+        inputs = [
+            node
+            for node in tree_to_list(elt, [])
+            if isinstance(node, Element)
+            and node.tag == "input"
+            and "name" in node.attributes
+        ]
 
         body = ""
         for input in inputs:
@@ -221,26 +264,38 @@ class Tab:
             self.load(back)
 
     def render(self):
-        if not self.need_render: return
-        self.browser.measure.time('render')
-        style(self.nodes, sorted(self.rules,
-            key=cascade_priority))
-        self.document = DocumentLayout(self.nodes)
-        self.document.layout()
-        self.display_list = []
-        paint_tree(self.document, self.display_list)
-        self.need_render = False
+        self.browser.measure.time("render")
+
+        if self.needs_style:
+            style(self.nodes, sorted(self.rules, key=cascade_priority), self)
+            self.needs_layout = True
+            self.needs_style = False
+
+        if self.needs_layout:
+            self.document = DocumentLayout(self.nodes)
+            self.document.layout()
+            self.needs_paint = True
+            self.needs_layout = False
+
+        if self.needs_paint:
+            self.display_list = []
+            paint_tree(self.document, self.display_list)
+            self.needs_paint = False
 
         clamped_scroll = self.clamp_scroll(self.scroll)
         if clamped_scroll != self.scroll:
             self.scroll_changed_in_tab = True
         self.scroll = clamped_scroll
 
-        self.browser.measure.stop('render')
+        self.browser.measure.stop("render")
+
+        # for item in self.display_list:
+        #     print_tree(item)
 
     def keypress(self, char):
         if self.focus:
-            if self.js.dispatch_event("keydown", self.focus): return
+            if self.js.dispatch_event("keydown", self.focus):
+                return
             if self.focus.tag == "input":
                 self.focus.attributes["value"] = (
                     self.focus.attributes.get("value", "") + char
@@ -250,4 +305,3 @@ class Tab:
 
     def allowed_request(self, url):
         return self.allowed_origins == None or url.origin() in self.allowed_origins
-
