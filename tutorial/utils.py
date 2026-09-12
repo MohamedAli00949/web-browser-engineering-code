@@ -49,3 +49,6 @@ def get_font(size, weight, style):
         FONTS[key] = font
 
     return skia.Font(FONTS[key], size)
+
+def dpx(css_px, zoom):
+    return css_px * zoom

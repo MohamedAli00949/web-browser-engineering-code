@@ -6,6 +6,10 @@ Node.prototype.getAttribute = function (attr) {
   return call_python("getAttribute", this.handle, attr);
 }
 
+Node.prototype.setAttribute = function (attr, value) {
+  call_python("setAttribute", this.handle, attr, value);
+}
+
 Object.defineProperty(Node.prototype, "innerHTML", {
   set: function (html) {
     call_python("innerHTML", this.handle, html.toString());

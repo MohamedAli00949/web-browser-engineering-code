@@ -4,28 +4,33 @@ from constants import *
 from html_parser import Text
 from utils import *
 
+
 def parse_transition(value):
     properties = {}
-    if not value: return properties
+    if not value:
+        return properties
     for item in value.split(","):
         property, duration = item.split(" ", 1)
         frames = int(float(duration[:-1]) / REFRESH_RATE_SEC)
         properties[property] = frames
     return properties
 
+
 def diff_styles(old_style, new_style):
     transitions = {}
-    for property, num_frames in \
-        parse_transition(new_style.get("transition")).items():
-        if property not in old_style: continue
-        if property not in new_style: continue
+    for property, num_frames in parse_transition(new_style.get("transition")).items():
+        if property not in old_style:
+            continue
+        if property not in new_style:
+            continue
         old_value = old_style[property]
         new_value = new_style[property]
-        if old_value == new_value: continue
-        transitions[property] = \
-            (old_value, new_value, num_frames)
+        if old_value == new_value:
+            continue
+        transitions[property] = (old_value, new_value, num_frames)
 
     return transitions
+
 
 class CSSParser:
     def __init__(self, s):
@@ -92,31 +97,63 @@ class CSSParser:
                 self.i += 1
         return None
 
-    def selector(self):
+    def simple_selector(self):
         out = TagSelector(self.word().casefold())
+        if self.i < len(self.s) and self.s[self.i] == ":":
+            self.literal(":")
+            pseudoclass = self.word().casefold()
+            out = PseudoClassSelector(pseudoclass, out)
+        return out
+
+    def selector(self):
+        out = self.simple_selector()
         self.whitespace()
         while self.i < len(self.s) and self.s[self.i] != "{":
-            tag = self.word()
-            descendant = TagSelector(tag.casefold())
+            descendant = self.simple_selector()
             out = DescendantSelector(out, descendant)
             self.whitespace()
         return out
 
+    def media_query(self):
+        self.literal("@")
+        assert self.word() == "media"
+        self.whitespace()
+        self.literal("(")
+        self.whitespace()
+        prop, val = self.pair([")"])
+        self.whitespace()
+        self.literal(")")
+        return prop, val
+
     def parse(self):
         rules = []
+        media = None
+        self.whitespace()
         while self.i < len(self.s):
             try:
-                self.whitespace()
-                selector = self.selector()
-                self.literal("{")
-                self.whitespace()
-                body = self.body()
-                self.literal("}")
-                rules.append((selector, body))
+                if self.s[self.i] == "@" and not media:
+                    prop, val = self.media_query()
+                    if prop == "prefers-color-scheme" and val in ["dark", "light"]:
+                        media = val
+                    self.whitespace()
+                    self.literal("{")
+                    self.whitespace()
+                elif self.s[self.i] == "}" and media:
+                    self.literal("}")
+                    media = None
+                    self.whitespace()
+                else:
+                    selector = self.selector()
+                    self.literal("{")
+                    self.whitespace()
+                    body = self.body()
+                    self.literal("}")
+                    self.whitespace()
+                    rules.append((media, selector, body))
             except Exception:
                 why = self.ignore_until(["}"])
-                if why == ";":
-                    self.literal(";")
+                if why == "}":
+                    self.literal("}")
                     self.whitespace()
                 else:
                     break
@@ -148,6 +185,21 @@ class DescendantSelector:
         return False
 
 
+class PseudoClassSelector:
+    def __init__(self, pseudoclass, base):
+        self.pseudoclass = pseudoclass
+        self.base = base
+        self.priority = self.base.priority
+
+    def matches(self, node):
+        if not self.base.matches(node):
+            return False
+        if self.pseudoclass == "focus":
+            return node.is_focused
+        else:
+            return False
+
+
 def style(node, rules, tab):
     old_style = node.style
     node.style = {}
@@ -158,7 +210,10 @@ def style(node, rules, tab):
         else:
             node.style[property] = default_value
 
-    for selector, body in rules:
+    for media, selector, body in rules:
+        if media:
+            if (media == "dark") != tab.dark_mode:
+                continue
         if not selector.matches(node):
             continue
         for property, value in body.items():
@@ -193,7 +248,7 @@ def style(node, rules, tab):
 
 
 def cascade_priority(rule):
-    selector, body = rule
+    media, selector, body = rule
     return selector.priority
 
 
@@ -217,6 +272,25 @@ def absolute_bounds_for_obj(obj):
         rect = map_translation(rect, parse_transform(cur.style.get("transform", "")))
         cur = cur.parent
     return rect
+
+
+def parse_outline(outline_str):
+    if not outline_str:
+        return None
+    values = outline_str.split(" ")
+    if len(values) != 3:
+        return None
+    if values[1] != "solid":
+        return None
+    return int(values[0][:-2]), values[2]
+
+
+def paint_outline(node, cmds, rect, zoom):
+    outline = parse_outline(node.style.get("outline"))
+    if not outline:
+        return
+    thickness, color = outline
+    cmds.append(DrawOutline(rect, color, dpx(thickness, zoom)))
 
 
 class NumericAnimation:
@@ -250,7 +324,8 @@ class DrawCompositedLayer(PaintCommand):
 
     def execute(self, canvas):
         layer = self.composited_layer
-        if not layer.surface: return
+        if not layer.surface:
+            return
         bounds = layer.composited_bounds()
         layer.surface.draw(canvas, bounds.left(), bounds.top())
 
@@ -273,7 +348,8 @@ class CompositedLayer:
 
     def raster(self):
         bounds = self.composited_bounds()
-        if bounds.isEmpty(): return
+        if bounds.isEmpty():
+            return
         irect = bounds.roundOut()
 
         if not self.surface:
@@ -319,14 +395,16 @@ class DocumentLayout:
         self.node = node
         self.parent = None
         self.children = []
+        self.zoom = 1
 
     def paint(self):
         return []
 
-    def layout(self):
-        self.width = WIDTH - 2 * HSTEP
-        self.x = HSTEP
-        self.y = VSTEP
+    def layout(self, zoom):
+        self.zoom = zoom
+        self.width = WIDTH - 2 * dpx(HSTEP, self.zoom)
+        self.x = dpx(HSTEP, self.zoom)
+        self.y = dpx(VSTEP, self.zoom)
 
         child = BlockLayout(self.node, self, None)
         self.children.append(child)
@@ -355,13 +433,11 @@ class DrawText(PaintCommand):
         self.rect = skia.Rect.MakeLTRB(x1, y1, self.right, self.bottom)
 
     def execute(self, canvas):
-        paint = skia.Paint(
-            AntiAlias=True,
-            Color=parse_color(self.color)
-        )
+        paint = skia.Paint(AntiAlias=True, Color=parse_color(self.color))
         baseline = self.rect.top() - self.font.getMetrics().fAscent
-        canvas.drawString(self.text, float(self.rect.left()), baseline,
-            self.font, paint)
+        canvas.drawString(
+            self.text, float(self.rect.left()), baseline, self.font, paint
+        )
 
 
 class DrawRRect(PaintCommand):
@@ -426,14 +502,18 @@ class DrawLine(PaintCommand):
         self.thickness = thickness
 
     def execute(self, canvas):
-        path = skia.Path().moveTo(self.rect.left(), self.rect.top()) \
-                        .lineTo(self.rect.right(), self.rect.bottom())
+        path = (
+            skia.Path()
+            .moveTo(self.rect.left(), self.rect.top())
+            .lineTo(self.rect.right(), self.rect.bottom())
+        )
         paint = skia.Paint(
             Color=parse_color(self.color),
             StrokeWidth=self.thickness,
             Style=skia.Paint.kStroke_Style,
         )
         canvas.drawPath(path, paint)
+
 
 class VisualEffect:
     def __init__(self, rect, children, node=None):
@@ -468,12 +548,13 @@ class TextLayout:
         self.y = 0
 
     def layout(self):
+        self.zoom = self.parent.zoom
         weight = self.node.style["font-weight"]
         style = self.node.style["font-style"]
-        if style == "normal":
-            style = "roman"
-        size = int(float(self.node.style["font-size"][:-2]) * 0.75)
+        px_size = float(self.node.style["font-size"][:-2])
+        size = dpx(px_size * 0.75, self.zoom)
         self.font = get_font(size, weight, style)
+        
         self.width = self.font.measureText(self.word)
 
         if self.previous:
@@ -483,6 +564,11 @@ class TextLayout:
             self.x = self.parent.x
 
         self.height = linespace(self.font)
+
+    def self_rect(self):
+        return skia.Rect.MakeLTRB(
+            self.x, self.y, self.x + self.width, self.y + self.height
+        )
 
     def paint(self):
         color = self.node.style["color"]
@@ -511,12 +597,14 @@ class InputLayout:
         self.y = 0
 
     def layout(self):
+        self.zoom = self.parent.zoom
         self.width = INPUT_WIDTH_PX
         weight = self.node.style["font-weight"]
         style = self.node.style["font-style"]
         if style == "normal":
             style = "roman"
-        size = int(float(self.node.style["font-size"][:-2]) * 0.75)
+        px_size = float(self.node.style["font-size"][:-2])
+        size = dpx(px_size * 0.75, self.zoom)
         self.font = get_font(size, weight, style)
 
         if self.previous:
@@ -532,7 +620,9 @@ class InputLayout:
         bgcolor = self.node.style.get("background-color", "transparent")
 
         if bgcolor != "transparent":
-            radius = float(self.node.style.get("border-radius", "0px")[:-2])
+            radius = dpx(
+                float(self.node.style.get("border-radius", "0px")[:-2]), self.zoom
+            )
             rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
@@ -545,12 +635,12 @@ class InputLayout:
                 print("Ignoring HTML contents inside button")
                 text = ""
 
-        if self.node.tag == "input" and self.node.is_focused:
-            cx = self.x + self.font.measureText(text)
-            cmds.append(DrawLine(cx, self.y, cx, self.y + self.height, "black", 1))
-
         color = self.node.style["color"]
         cmds.append(DrawText(self.x, self.y, text, self.font, color))
+
+        if self.node.is_focused and self.node.tag == "input":
+            cx = self.x + self.font.measureText(text)
+            cmds.append(DrawLine(cx, self.y, cx, self.y + self.height, "black", 1))
 
         return cmds
 
@@ -563,6 +653,8 @@ class InputLayout:
         return True
 
     def paint_effects(self, cmds):
+        cmds = paint_visual_effects(self.node, cmds, self.self_rect())
+        paint_outline(self.node, cmds, self.self_rect(), self.zoom)
         return cmds
 
 
@@ -579,6 +671,7 @@ class LineLayout:
         self.height = 0
 
     def layout(self):
+        self.zoom = self.parent.zoom
         self.x = self.parent.x
         self.width = self.parent.width
 
@@ -608,6 +701,15 @@ class LineLayout:
         return True
 
     def paint_effects(self, cmds):
+        outline_rect = skia.Rect.MakeEmpty()
+        outline_node = None
+        for child in self.children:
+            outline_str = child.node.parent.style.get("outline")
+            if parse_outline(outline_str):
+                outline_rect.join(child.self_rect())
+                outline_node = child.node.parent
+        if outline_node:
+            paint_outline(outline_node, cmds, outline_rect, self.zoom)
         return cmds
 
 
@@ -680,8 +782,7 @@ class Blend(VisualEffect):
 
     def execute(self, canvas):
         paint = skia.Paint(
-            Alphaf=self.opacity,
-            BlendMode=parse_blend_mode(self.blend_mode)
+            Alphaf=self.opacity, BlendMode=parse_blend_mode(self.blend_mode)
         )
         if self.should_save:
             canvas.saveLayer(None, paint)
@@ -758,7 +859,7 @@ class Transform(VisualEffect):
 
     def execute(self, canvas):
         if self.translation:
-            (x, y) = self.translation
+            x, y = self.translation
             canvas.save()
             canvas.translate(x, y)
         for cmd in self.children:
@@ -786,6 +887,7 @@ class Transform(VisualEffect):
 class BlockLayout:
     def __init__(self, node, parent, previous):
         self.node = node
+        node.layout_object = self
         self.parent = parent
         self.previous = previous
         self.children = []
@@ -827,7 +929,7 @@ class BlockLayout:
         return cmds
 
     def input(self, node):
-        w = INPUT_WIDTH_PX
+        w = dpx(INPUT_WIDTH_PX, self.zoom)
         if self.cursor_x + w > self.width:
             self.new_line()
         line = self.children[-1]
@@ -839,12 +941,14 @@ class BlockLayout:
         style = node.style["font-style"]
         if style == "normal":
             style = "roman"
-        size = int(float(node.style["font-size"][:-2]) * 0.75)
+        px_size = float(node.style["font-size"][:-2])
+        size = dpx(px_size * 0.75, self.zoom)
         font = get_font(size, weight, style)
 
         self.cursor_x += w + font.measureText(" ")
 
     def layout(self):
+        self.zoom = self.parent.zoom
         self.x = self.parent.x
         self.width = self.parent.width
 
@@ -925,6 +1029,8 @@ class BlockLayout:
         previous_word = line.children[-1] if line.children else None
         text = TextLayout(node, word, line, previous_word)
         line.children.append(text)
+        px_size = float(node.style["font-size"][:-2])
+        size = dpx(px_size * 0.75, self.zoom)
 
     def flush(self):
         if not self.line:
