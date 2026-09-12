@@ -2,47 +2,71 @@ from embed_layout import *
 from line_layout import *
 from transform_effects import *
 from paint_command import *
+from protected_field import *
 
-class LineLayout(EmbedLayout):
+
+class LineLayout:
     def __init__(self, node, parent, previous):
         self.node = node
         self.parent = parent
         self.previous = previous
         self.children = []
 
-        self.x = None
-        self.y = None
-        self.width = 0
-        self.height = 0
+        self.x = ProtectedField()
+        self.y = ProtectedField()
+        self.width = ProtectedField()
+        self.height = ProtectedField()
+
+        self.ascent = ProtectedField()
+        self.descent = ProtectedField()
+
+        self.zoom = ProtectedField()
+        self.parent.zoom.invalidations.add(self.zoom)
 
     def layout(self):
-        self.zoom = self.parent.zoom
-        self.width = self.parent.width
-        self.x = self.parent.x
+        self.zoom.copy(self.parent.zoom)
+        self.width.copy(self.parent.width)
+        self.x.copy(self.parent.x)
 
         if self.previous:
-            self.y = self.previous.y + self.previous.height
+            prev_y = self.previous.y.read(notify=self.y)
+            prev_height = self.previous.height.read(notify=self.y)
+            self.y.set(prev_y + prev_height)
         else:
-            self.y = self.parent.y
+            self.y.copy(self.parent.y)
 
         for word in self.children:
             word.layout()
 
         if not self.children:
-            self.height = 0
+            self.ascent.set(0)
+            self.descent.set(0)
+            self.height.set(0)
             return
 
-        max_ascent = max([-child.ascent for child in self.children])
-        baseline = self.y + max_ascent
+        self.ascent.set(max([
+            -child.ascent.read(notify=self.ascent)
+            for child in self.children
+        ]))
+
+        self.descent.set(max([
+            child.descent.read(notify=self.descent)
+            for child in self.children
+        ]))
 
         for child in self.children:
+            new_y = self.y.read(notify=child.y)
+            new_y += self.ascent.read(notify=child.y)
             if isinstance(child, TextLayout):
-                child.y = baseline + child.ascent / 1.25
+                new_y += child.ascent.read(notify=child.y) / 1.25
             else:
-                child.y = baseline + child.ascent
+                new_y += child.ascent.read(notify=child.y)
+            child.y.set(new_y)
 
-        max_descent = max([child.descent for child in self.children])
-        self.height = max_ascent + max_descent
+        max_ascent = self.ascent.read(notify=self.height)
+        max_descent = self.descent.read(notify=self.height)
+
+        self.height.set(max_ascent + max_descent)
 
     def paint(self):
         return []
@@ -54,12 +78,13 @@ class LineLayout(EmbedLayout):
         outline_rect = skia.Rect.MakeEmpty()
         outline_node = None
         for child in self.children:
-            outline_str = child.node.parent.style.get("outline")
+            outline_str = child.node.parent.style["outline"].get()
             if parse_outline(outline_str):
                 outline_rect.join(child.self_rect())
                 outline_node = child.node.parent
+
         if outline_node:
-            paint_outline(outline_node, cmds, outline_rect, self.zoom)
+            paint_outline(outline_node, cmds, outline_rect, self.zoom.get())
         return cmds
 
 class TextLayout:
@@ -70,30 +95,46 @@ class TextLayout:
         self.parent = parent
         self.previous = previous
 
-        self.font = None
+        self.font = ProtectedField()
+        self.ascent = ProtectedField()
+        self.descent = ProtectedField()
         self.weight = 0
         self.style = "roman"
         self.size = 0
-        self.height = 0
-        self.x = 0
-        self.y = 0
+        self.width = ProtectedField()
+        self.height = ProtectedField()
+        self.x = ProtectedField()
+        self.y = ProtectedField()
+
+        self.zoom = ProtectedField()
+        # self.parent.zoom.invalidations.add(self.zoom)
 
     def layout(self):
-        self.zoom = self.parent.zoom
-        self.font = font(self.node.style, self.zoom)
+        self.zoom.copy(self.parent.zoom)
 
-        self.width = self.font.measureText(self.word)
+        zoom = self.zoom.read(notify=self.font)
+        style = self.node.style.read(notify=self.font)
+        self.font.set(font(style, zoom))
+
+        f = self.font.read(notify=self.width)
+        self.width.set(f.measureText(self.word))
+
+        f = self.font.read(notify=self.ascent)
+        self.ascent.set(f.getMetrics().fAscent * 1.25)
+
+        f = self.font.read(notify=self.descent)
+        self.descent.set(f.getMetrics().fDescent * 1.25)
+
+        f = self.font.read(notify=self.height)
+        self.height.set(linespace(f) * 1.25)
 
         if self.previous:
-            space = self.previous.font.measureText(" ")
-            self.x = self.previous.x + space + self.previous.width
+            prev_x = self.previous.x.read(notify=self.x)
+            prev_font = self.previous.font.read(notify=self.x)
+            prev_width = self.previous.width.read(notify=self.x)
+            self.x.set(prev_x + prev_font.measureText(" ") + prev_width)
         else:
-            self.x = self.parent.x
-
-        self.height = linespace(self.font)
-
-        self.ascent = self.font.getMetrics().fAscent * 1.25
-        self.descent = self.font.getMetrics().fDescent * 1.25
+            self.x.copy(self.parent.x)
 
     def self_rect(self):
         return skia.Rect.MakeLTRB(

@@ -285,7 +285,7 @@ class Frame:
                 pass
             elif elt.tag == "iframe":
                 abs_bounds = absolute_bounds_for_obj(elt.layout_object)
-                border = dpx(1, elt.layout_object.zoom)
+                border = dpx(1, elt.layout_object.zoom.get())
                 new_x = x - abs_bounds.left() + border
                 new_y = y - abs_bounds.top() + border
                 elt.frame.click(new_x, new_y)
@@ -333,7 +333,7 @@ class Frame:
             obj = self.tab.focus.layout_object
             while not isinstance(obj, BlockLayout):
                 obj = obj.parent
-            obj.children_dirty = True
+            obj.children.mark()
 
             self.set_needs_render()
 

@@ -5,7 +5,7 @@ class Text:
         self.text = text
         self.children = []
         self.parent = parent
-        self.style = {}
+        self.style = ProtectedField()
         self.animations = {}
         self.is_focused = False
         self.layout_object = None
@@ -21,7 +21,7 @@ class Element:
         self.parent = parent
         self.attributes = attributes
         self.is_focused = False
-        self.style = {}
+        self.style = ProtectedField()
         self.animations = {}
         self.layout_object = None
 
@@ -50,7 +50,12 @@ def paint_tree(layout_object, display_list):
 
 def tree_to_list(tree, list):
     list.append(tree)
-    for child in tree.children:
+    children = tree.children
+
+    if isinstance(children, ProtectedField):
+        children = children.get()
+
+    for child in children:
         tree_to_list(child, list)
 
     return list

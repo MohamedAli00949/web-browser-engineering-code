@@ -1,4 +1,5 @@
 from utils import *
+from protected_field import *
 
 class EmbedLayout:
     def __init__(self, node, parent, previous, frame):
@@ -9,20 +10,31 @@ class EmbedLayout:
         self.parent = parent
         self.previous = previous
 
-        self.x = None
-        self.y = None
-        self.width = None
-        self.height = None
-        self.font = None
+        self.x = ProtectedField()
+        self.y = ProtectedField()
+        self.width = ProtectedField()
+        self.height = ProtectedField()
+        self.font = ProtectedField()
+        self.ascent = ProtectedField()
+        self.descent = ProtectedField()
+
+        self.zoom = ProtectedField()
+        # self.parent.zoom.invalidations.add(self.zoom)
 
     def layout(self):
-        self.zoom = self.parent.zoom
-        self.font = font(self.node.style, self.zoom)
+        self.zoom.copy(self.parent.zoom)
+
+        zoom = self.zoom.read(notify=self.font)
+        style = self.node.style.read(notify=self.font)
+        self.font.set(font(style, zoom))
+
         if self.previous:
-            space = self.previous.font.measureText(" ")
-            self.x = self.previous.x + space + self.previous.width
+            prev_x = self.previous.x.read(notify=self.x)
+            prev_font = self.previous.font.read(notify=self.x)
+            prev_width = self.previous.width.read(notify=self.x)
+            self.x.set(prev_x + prev_font.measureText(" ") + prev_width)
         else:
-            self.x = self.parent.x
+            self.x.copy(self.parent.x)
 
     def should_paint(self):
         return True

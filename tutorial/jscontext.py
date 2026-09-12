@@ -77,6 +77,10 @@ class JSContext:
         frame = self.tab.window_id_to_frame[window_id]
         self.throw_if_cross_origin(frame)
         elt = self.handle_to_node[handle]
+        obj = elt.layout_object
+        if isinstance(obj, IframeLayout) or isinstance(obj, ImageLayout):
+            if attr == "width" or attr == "height":
+                obj.width.mark()
         elt.attributes[attr] = value
         self.tab.set_needs_render_all_frames()
 
@@ -85,6 +89,7 @@ class JSContext:
         self.throw_if_cross_origin(frame)
         elt = self.handle_to_node[handle]
         elt.attributes["style"] = s
+        elt.style.mark()
         frame.set_needs_render()
 
     def querySelectorAll(self, selector_text, window_id):
@@ -137,8 +142,8 @@ class JSContext:
         obj = elt.layout_object
         while not isinstance(obj, BlockLayout):
             obj = obj.parent
-        
-        obj.children_dirty = True
+
+        obj.children.mark()
 
         frame.set_needs_render()
 
