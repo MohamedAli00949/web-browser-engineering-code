@@ -47,14 +47,18 @@ class AccessibilityNode:
         bounds = []
         while not inline.layout_object:
             inline = inline.parent
-        for line in inline.layout_object.children:
+        for line in inline.layout_object.children.get():
             line_bounds = skia.Rect.MakeEmpty()
             for child in line.children:
                 if child.node.parent == self.node:
                     line_bounds.join(
-                        skia.Rect.MakeXYWH(child.x, child.y, child.width, child.height)
+                        skia.Rect.MakeXYWH(
+                            child.x.get(),
+                            child.y.get(),
+                            child.width.get(),
+                            child.height.get(),
+                        )
                     )
-
             bounds.append(line_bounds)
 
         return bounds
@@ -159,7 +163,7 @@ class FrameAccessibilityNode(AccessibilityNode):
     def __init__(self, node, parent=None):
         super().__init__(node, parent)
         self.scroll = self.node.frame.scroll
-        self.zoom = self.node.layout_object.zoom
+        self.zoom = self.node.layout_object.zoom.get()
 
     def build(self):
         self.build_internal(self.node.frame.nodes)

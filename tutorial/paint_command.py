@@ -100,7 +100,7 @@ class DrawRect(PaintCommand):
 
 
 def paint_outline(node, cmds, rect, zoom):
-    outline = parse_outline(node.style.get("outline"))
+    outline = parse_outline(node.style["outline"].get())
     if not outline:
         return
     thickness, color = outline

@@ -7,7 +7,8 @@ class IframeLayout(EmbedLayout):
     def __init__(self, node, parent, previous, parent_frame):
         super().__init__(node, parent, previous, parent_frame)
 
-    def layout(self):
+    def layout(self):  # done
+        if not self.layout_needed(): return
         super().layout()
 
         width_attr = self.node.attributes.get("width")

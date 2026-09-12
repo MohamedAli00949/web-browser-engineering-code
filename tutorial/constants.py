@@ -71,9 +71,25 @@ NAMED_COLORS = {
     "transparent": None,
 }
 
-REFRESH_RATE_SEC = .033
+REFRESH_RATE_SEC = 0.033
 
 SHOW_COMPOSITED_LAYER_BORDERS = False
 
 IFRAME_WIDTH_PX = 300
 IFRAME_HEIGHT_PX = 150
+
+CSS_PROPERTIES = {
+    "font-size": "inherit",
+    "font-weight": "inherit",
+    "font-style": "inherit",
+    "color": "inherit",
+    "opacity": "1.0",
+    "transition": "",
+    "transform": "none",
+    "mix-blend-mode": None,
+    "border-radius": "0px",
+    "overflow": "visible",
+    "outline": "none",
+    "background-color": "transparent",
+    "image-rendering": "auto",
+}

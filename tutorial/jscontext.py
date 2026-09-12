@@ -73,7 +73,7 @@ class JSContext:
             self.tab.browser.measure.stop("script-load")
             print("Script: ", script, "crashed: ", e)
 
-    def setAttribute(self, handle, attr, value, window_id):
+    def setAttribute(self, handle, attr, value, window_id): # done
         frame = self.tab.window_id_to_frame[window_id]
         self.throw_if_cross_origin(frame)
         elt = self.handle_to_node[handle]
@@ -81,15 +81,16 @@ class JSContext:
         if isinstance(obj, IframeLayout) or isinstance(obj, ImageLayout):
             if attr == "width" or attr == "height":
                 obj.width.mark()
+                obj.height.mark()
         elt.attributes[attr] = value
         self.tab.set_needs_render_all_frames()
 
-    def style_set(self, handle, s, window_id):
+    def style_set(self, handle, s, window_id): # done
         frame = self.tab.window_id_to_frame[window_id]
         self.throw_if_cross_origin(frame)
         elt = self.handle_to_node[handle]
         elt.attributes["style"] = s
-        elt.style.mark()
+        dirty_style(elt)
         frame.set_needs_render()
 
     def querySelectorAll(self, selector_text, window_id):
@@ -127,7 +128,7 @@ class JSContext:
             return False  # allow default behavior to continue
         return not do_default
 
-    def innerHTML_set(self, handle, s, window_id):
+    def innerHTML_set(self, handle, s, window_id): # done
         frame = self.tab.window_id_to_frame[window_id]
         self.throw_if_cross_origin(frame)
         doc = HTMLParser("<html><body>" + s + "</body></html>").parse()
@@ -140,10 +141,11 @@ class JSContext:
             child.parent = elt
 
         obj = elt.layout_object
-        while not isinstance(obj, BlockLayout):
-            obj = obj.parent
+        if obj:
+            while not isinstance(obj, BlockLayout):
+                obj = obj.parent
 
-        obj.children.mark()
+            obj.children.mark()
 
         frame.set_needs_render()
 

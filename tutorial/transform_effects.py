@@ -77,16 +77,16 @@ class Blend(VisualEffect):
 
 
 def paint_visual_effects(node, cmds, rect):
-    opacity = float(node.style.get("opacity", "1.0"))
-    blend_mode = node.style.get("mix-blend-mode")
-    translation = parse_transform(node.style.get("transform", ""))
+    opacity = float(node.style["opacity"].get())
+    blend_mode = node.style["mix-blend-mode"].get()
+    translation = parse_transform(node.style["transform"].get())
 
-    if node.style.get("overflow", "visible") == "clip":
+    if node.style["overflow"].get() == "clip":
         if not blend_mode:
             blend_mode = "source-over"
 
-    if node.style.get("overflow", "visible") == "clip":
-        border_radius = float(node.style.get("border-radius", "0px")[0:-2])
+    if node.style["overflow"].get() == "clip":
+        border_radius = float(node.style["border-radius"].get()[0:-2])
         cmds.append(
             Blend(
                 1.0, "destination-in", None, [DrawRRect(rect, border_radius, "black")]

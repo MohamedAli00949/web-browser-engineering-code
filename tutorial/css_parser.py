@@ -181,52 +181,83 @@ class PseudoClassSelector:
             return False
 
 
+def init_style(node):
+    node.style = dict(
+        [
+            (
+                property,
+                ProtectedField(
+                    node,
+                    property,
+                    None,
+                    (
+                        [node.parent.style[property]]
+                        if node.parent and property in INHERITED_PROPERTIES
+                        else []
+                    ),
+                ),
+            )
+            for property in CSS_PROPERTIES
+        ]
+    )
+
+
 def style(node, rules, frame):
-    old_style = node.style.value
-    new_style = {}
+    if not node.style:
+        init_style(node)
+    needs_style = any([field.dirty for field in node.style.values()])
+    if needs_style:
+        old_style = dict(
+            [(property, field.value) for property, field in node.style.items()]
+        )
+        new_style = CSS_PROPERTIES.copy()
 
-    for property, default_value in INHERITED_PROPERTIES.items():
-        if node.parent:
-            parent_style = node.parent.style.read(notify=node.style)
-            new_style[property] = parent_style[property]
-        else:
-            new_style[property] = default_value
+        for property, default_value in INHERITED_PROPERTIES.items():
+            if node.parent:
+                # parent_style = node.parent.style.read(notify=node.style)
+                parent_field = node.parent.style[property]
+                parent_value = parent_field.read(notify=node.style[property])
+                new_style[property] = parent_value
+            else:
+                new_style[property] = default_value
 
-    for media, selector, body in rules:
-        if media:
-            if (media == "dark") != frame.tab.dark_mode:
+        for media, selector, body in rules:
+            if media:
+                if (media == "dark") != frame.tab.dark_mode:
+                    continue
+            if not selector.matches(node):
                 continue
-        if not selector.matches(node):
-            continue
-        for property, value in body.items():
-            new_style[property] = value
+            for property, value in body.items():
+                new_style[property] = value
 
-    if isinstance(node, Element) and "style" in node.attributes:
-        pairs = CSSParser(node.attributes["style"]).body()
-        for prop, value in pairs.items():
-            new_style[prop] = value
+        if isinstance(node, Element) and "style" in node.attributes:
+            pairs = CSSParser(node.attributes["style"]).body()
+            for prop, value in pairs.items():
+                new_style[prop] = value
 
-    if new_style["font-size"].endswith("%"):
-        # print("node: ", node, node.style)
-        if node.parent:
-            parent_style = node.parent.style.read(notify=node.style)
-            parent_font_size = parent_style["font-size"]
-        else:
-            parent_font_size = INHERITED_PROPERTIES["font-size"]
-        node_pct = float(new_style["font-size"][:-1]) / 100
-        parent_px = float(parent_font_size[:-2])
-        new_style["font-size"] = str(node_pct * parent_px) + "px"
+        if new_style["font-size"].endswith("%"):
+            # print("node: ", node, node.style)
+            if node.parent:
+                parent_field = node.parent.style["font-size"]
+                parent_font_size = parent_field.read(notify=node.style["font-size"])
+            else:
+                parent_font_size = INHERITED_PROPERTIES["font-size"]
+            node_pct = float(new_style["font-size"][:-1]) / 100
+            parent_px = float(parent_font_size[:-2])
+            new_style["font-size"] = str(node_pct * parent_px) + "px"
 
-    if old_style:
-        transitions = diff_styles(old_style, new_style)
-        for property, (old_value, new_value, num_frames) in transitions.items():
-            if property == "opacity":
-                frame.set_needs_render()
-                animation = NumericAnimation(old_value, new_value, num_frames)
-                node.animations[property] = animation
-                new_style[property] = animation.animate()
+        if old_style:
+            transitions = diff_styles(old_style, new_style)
+            for property, (old_value, new_value, num_frames) in transitions.items():
+                if property == "opacity":
+                    frame.set_needs_render()
+                    animation = NumericAnimation(old_value, new_value, num_frames)
+                    node.animations[property] = animation
+                    new_style[property] = animation.animate()
 
-    node.style.set(new_style)
+        for property, field in node.style.items():
+            field.set(new_style[property])
+
     for child in node.children:
         style(child, rules, frame)
 
@@ -277,16 +308,35 @@ class DocumentLayout:
         self.parent = None
         self.previous = None
         self.children = []
-        self.zoom = ProtectedField()
-        self.width = ProtectedField()
-        self.height = ProtectedField()
-        self.x = ProtectedField()
-        self.y = ProtectedField()
+        self.zoom = ProtectedField(self, "zoom", None, [])
+        self.width = ProtectedField(self, "width", None, [])
+        self.x = ProtectedField(self, "x", None, [])
+        self.y = ProtectedField(self, "y", None, [])
+        self.height = ProtectedField(self, "height")
+
+        self.has_dirty_descendants = True
 
     def paint(self):  # done
         return []
 
-    def layout(self, width, zoom):
+    def layout_needed(self):  # done
+        if self.zoom.dirty:
+            return True
+        if self.width.dirty:
+            return True
+        if self.height.dirty:
+            return True
+        if self.x.dirty:
+            return True
+        if self.y.dirty:
+            return True
+        if self.has_dirty_descendants:
+            return True
+        return False
+
+    def layout(self, width, zoom):  # done
+        if not self.layout_needed():
+            return
         # self.zoom.mark()
         # zoom = self.zoom.read(notify=child)
         self.zoom.set(zoom)
@@ -294,6 +344,7 @@ class DocumentLayout:
 
         if not self.children:
             child = BlockLayout(self.node, self, None, self.frame)
+            self.height.set_dependencies([child.height])
         else:
             child = self.children[0]
         self.children = [child]
@@ -302,6 +353,7 @@ class DocumentLayout:
         self.y.set(dpx(VSTEP, zoom))
 
         child.layout()
+        self.has_dirty_descendants = False
 
         self.height.copy(child.height)
 
@@ -324,7 +376,9 @@ class InputLayout(EmbedLayout):
     def __init__(self, node, parent, previous, frame):
         super().__init__(node, parent, previous, frame)
 
-    def layout(self):
+    def layout(self):  # done
+        if not self.layout_needed():
+            return
         super().layout()
         zoom = self.zoom.read(notify=self.width)
         self.width.set(dpx(INPUT_WIDTH_PX, zoom))
@@ -336,7 +390,7 @@ class InputLayout(EmbedLayout):
         self.ascent.set(-height)
         self.descent.set(0)
 
-    def paint(self): # done
+    def paint(self):  # done
         cmds = []
 
         # bgcolor = self.node.style.get("background-color", "transparent")
@@ -346,8 +400,8 @@ class InputLayout(EmbedLayout):
             #     float(self.node.style.get("border-radius", "0px")[:-2]), self.zoom.get()
             # )
             radius = dpx(
-                float(self.node.style["border-radius"].get()[:-2]),
-                self.zoom.get())
+                float(self.node.style["border-radius"].get()[:-2]), self.zoom.get()
+            )
             rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
@@ -370,7 +424,7 @@ class InputLayout(EmbedLayout):
 
         return cmds
 
-    def self_rect(self): # done
+    def self_rect(self):  # done
         return skia.Rect.MakeLTRB(
             self.x.get(),
             self.y.get(),
@@ -381,7 +435,7 @@ class InputLayout(EmbedLayout):
     def should_paint(self):
         return True
 
-    def paint_effects(self, cmds): # done
+    def paint_effects(self, cmds):  # done
         cmds = paint_visual_effects(self.node, cmds, self.self_rect())
         paint_outline(self.node, cmds, self.self_rect(), self.zoom.get())
         return cmds
@@ -391,7 +445,9 @@ class ImageLayout(EmbedLayout):
     def __init__(self, node, parent, previous, frame):
         super().__init__(node, parent, previous, frame)
 
-    def layout(self):
+    def layout(self):  # done
+        if not self.layout_needed():
+            return
         super().layout()
 
         width_attr = self.node.attributes.get("width")
@@ -423,7 +479,7 @@ class ImageLayout(EmbedLayout):
         self.ascent.set(-height)
         self.descent.set(0)
 
-    def paint(self): # done
+    def paint(self):  # done
         cmds = []
         rect = skia.Rect.MakeLTRB(
             self.x.get(),
@@ -459,10 +515,9 @@ class Opacity:
             canvas.restore()
 
 
-def DrawCursor(elt, offset):
-    x = elt.x + offset
-    return DrawLine(x, elt.y, x, elt.y + elt.height, "red", 1)
-
+def DrawCursor(elt, offset): # done
+    x = elt.x.get() + offset
+    return DrawLine(x, elt.y.get(), x, elt.y.get() + elt.height.get(), "red", 1)
 
 class BlockLayout:
     def __init__(self, node, parent, previous, frame):
@@ -470,44 +525,55 @@ class BlockLayout:
         node.layout_object = self
         self.parent = parent
         self.previous = previous
-        self.children = ProtectedField()
-
-        self.x = ProtectedField()
-        self.y = ProtectedField()
-        self.width = ProtectedField()
-        self.height = ProtectedField()
-
         self.frame = frame
-        self.zoom = ProtectedField()
-        self.parent.zoom.invalidations.add(self.zoom)
+
+        self.zoom = ProtectedField(self, "zoom", self.parent, [self.parent.zoom])
+        self.width = ProtectedField(self, "width", self.parent, [self.parent.width])
+        self.height = ProtectedField(self, "height", self.parent)
+        self.x = ProtectedField(self, "x", self.parent, [self.parent.x])
+
+        if self.previous:
+            y_dependencies = [self.previous.y, self.previous.height]
+        else:
+            y_dependencies = [self.parent.y]
+        self.y = ProtectedField(self, "y", self.parent, y_dependencies)
+
+        self.children = ProtectedField(self, "children", self.parent, None, [])
+
+        self.has_dirty_descendants = True
 
     def self_rect(self):
-        return skia.Rect.MakeXYWH(
-            self.x, self.y, self.x + self.width, self.y + self.height
+        return skia.Rect.MakeLTRB(
+            self.x.get(),
+            self.y.get(),
+            self.x.get() + self.width.get(),
+            self.y.get() + self.height.get(),
         )
 
     def paint(self):
         assert not self.children.dirty
         cmds = []
 
-        bgcolor = self.node.style.get("background-color", "transparent")
+        bgcolor = self.node.style["background-color"].get()
 
         if bgcolor != "transparent":
-            radius = float(self.node.style.get("border-radius", "0px")[:-2])
+            radius = dpx(
+                float(self.node.style["border-radius"].get()[:-2]), self.zoom.get()
+            )
             rect = DrawRRect(self.self_rect(), radius, bgcolor)
             cmds.append(rect)
 
-        if self.node.is_focused and "contenteditable" in self.node.attributes:
-            text_nodes = [
-                t for t in tree_to_list(self.node, []) if isinstance(t, TextLayout)
-            ]
-            if text_nodes:
-                cmds.append(DrawCursor(text_nodes[-1], text_nodes[-1].width))
-            else:
-                cmds.append(DrawCursor(self, 0))
-        # if self.layout_mode() == "inline":
-        #     for x, y, word, font, color in self.display_list:
-        #         cmds.append(DrawText(x, y, word, font, color))
+        # if self.node.is_focused and "contenteditable" in self.node.attributes:
+        #     text_nodes = [
+        #         t for t in tree_to_list(self.node, []) if isinstance(t, TextLayout)
+        #     ]
+        #     if text_nodes:
+        #         cmds.append(DrawCursor(text_nodes[-1], text_nodes[-1].width))
+        #     else:
+        #         cmds.append(DrawCursor(self, 0))
+        # # if self.layout_mode() == "inline":
+        # #     for x, y, word, font, color in self.display_list:
+        # #         cmds.append(DrawText(x, y, word, font, color))
 
         return cmds
 
@@ -516,7 +582,27 @@ class BlockLayout:
         w = dpx(INPUT_WIDTH_PX, zoom)
         self.add_inline_child(node, w, InputLayout, self.frame)
 
+    def layout_needed(self):
+        if self.zoom.dirty:
+            return True
+        if self.width.dirty:
+            return True
+        if self.height.dirty:
+            return True
+        if self.x.dirty:
+            return True
+        if self.y.dirty:
+            return True
+        if self.children.dirty:
+            return True
+        if self.has_dirty_descendants:
+            return True
+        return False
+
     def layout(self):
+        if not self.layout_needed():
+            return
+
         self.zoom.copy(self.parent.zoom)
         self.x.copy(self.parent.x)
         self.width.copy(self.parent.width)
@@ -538,19 +624,27 @@ class BlockLayout:
                     children.append(next)
                     previous = next
                 self.children.set(children)
+
+                height_dependencies = [child.height for child in children]
+                height_dependencies.append(self.children)
+                self.height.set_dependencies(height_dependencies)
         else:
             if self.children.dirty:
                 self.temp_children = []
                 self.new_line()
                 self.recurse(self.node)
                 self.children.set(self.temp_children)
-                self.temp_children = None
+
+                height_dependencies = [child.height for child in self.temp_children]
+                height_dependencies.append(self.children)
+                self.height.set_dependencies(height_dependencies)
 
         assert not self.children.dirty
         for child in self.children.get():
             child.layout()
 
-        assert not self.children.dirty
+        self.has_dirty_descendants = False
+
         children = self.children.read(notify=self.height)
         new_height = sum([child.height.read(notify=self.height) for child in children])
         self.height.set(new_height)
@@ -612,8 +706,7 @@ class BlockLayout:
 
     def word(self, node, word):
         zoom = self.zoom.read(notify=self.children)
-        style = self.children.read(node.style)
-        node_font = font(style, zoom)
+        node_font = font(node.style, zoom, notify=self.children)
         w = node_font.measureText(word)
         self.add_inline_child(node, w, TextLayout, self.frame, word)
 
@@ -677,6 +770,15 @@ class BlockLayout:
         )
 
     def paint_effects(self, cmds):
+        if self.node.is_focused and "contenteditable" in self.node.attributes:
+            text_nodes = [
+                t for t in tree_to_list(self, []) if isinstance(t, TextLayout)
+            ]
+            if text_nodes:
+                cmds.append(DrawCursor(text_nodes[-1], text_nodes[-1].width.get()))
+            else:
+                cmds.append(DrawCursor(self, 0))
+
         cmds = paint_visual_effects(self.node, cmds, self.self_rect())
 
         return cmds
@@ -686,11 +788,13 @@ class BlockLayout:
         if self.cursor_x + w > width:
             self.new_line()
         line = self.temp_children[-1]
-        previous_word = line.children[-1] if line.children else None
         if word:
-            child = child_class(node, word, line, previous_word)
+            child = child_class(node, word, line, self.previous_word)
         else:
-            child = child_class(node, line, previous_word, frame)
+            child = child_class(node, line, self.previous_word, frame)
         line.children.append(child)
+        self.previous_word = child
         zoom = self.zoom.read(notify=self.children)
-        self.cursor_x += w + font(node.style, zoom).measureText(" ")
+        self.cursor_x += w + font(node.style, zoom, notify=self.children).measureText(
+            " "
+        )

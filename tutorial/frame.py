@@ -209,12 +209,13 @@ class Frame:
             self.tab.browser.focus_addressbar()
         self.set_needs_render()
 
-    def focus_element(self, node):
+    def focus_element(self, node):  # done
         if node and node != self.tab.focus:
             self.needs_focus_scroll = True
 
         if self.tab.focus:
             self.tab.focus.is_focused = False
+            dirty_style(self.tab.focus)
 
         if self.tab.focused_frame and self.tab.focused_frame != self:
             self.tab.focused_frame.set_needs_render()
@@ -224,6 +225,7 @@ class Frame:
 
         if node:
             node.is_focused = True
+            dirty_style(node)
 
         self.set_needs_render()
 
@@ -286,8 +288,8 @@ class Frame:
             elif elt.tag == "iframe":
                 abs_bounds = absolute_bounds_for_obj(elt.layout_object)
                 border = dpx(1, elt.layout_object.zoom.get())
-                new_x = x - abs_bounds.left() + border
-                new_y = y - abs_bounds.top() + border
+                new_x = x - abs_bounds.left() - border
+                new_y = y - abs_bounds.top() - border
                 elt.frame.click(new_x, new_y)
                 return
             elif is_focusable(elt):
@@ -313,10 +315,10 @@ class Frame:
         if self.tab.focus and self.tab.focus.tag == "input":
             if not "value" in self.tab.focus.attributes:
                 self.activate_element(self.tab.focus)
-            
+
             if self.js.dispatch_event("keydown", self.tab.focus, self.window_id):
                 return
-            
+
             self.tab.focus.attributes["value"] += char
             self.set_needs_render()
         elif self.tab.focus and "contenteditable" in self.tab.focus.attributes:
@@ -338,10 +340,10 @@ class Frame:
             self.set_needs_render()
 
     def clamp_scroll(self, scroll):
-        height = math.ceil(self.document.height + 2 * VSTEP)
+        height = math.ceil(self.document.height.get() + 2 * VSTEP)
         maxscroll = height - self.frame_height
         return max(0, min(scroll, maxscroll))
-    
+
     def scroll_to(self, elt):
         assert not (self.needs_style or self.needs_layout)
         objs = [
@@ -351,9 +353,9 @@ class Frame:
         if not objs: return
         obj = objs[0]
 
-        if self.scroll < obj.y < self.scroll + self.frame_height:
+        if self.scroll < obj.y.get() < self.scroll + self.frame_height:
             return
-        new_scroll = obj.y - SCROLL_STEP
+        new_scroll = obj.y.get() - SCROLL_STEP
         self.scroll = self.clamp_scroll(new_scroll)
         self.scroll_changed_in_frame = True
         self.tab.set_needs_paint()
