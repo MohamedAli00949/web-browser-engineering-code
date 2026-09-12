@@ -47,7 +47,13 @@ class AccessibilityNode:
         bounds = []
         while not inline.layout_object:
             inline = inline.parent
-        for line in inline.layout_object.children.get():
+
+        children = []
+        if isinstance(inline.layout_object.children, ProtectedField):
+            children = inline.layout_object.children.get()
+        else:
+            children = inline.layout_object.children
+        for line in children:
             line_bounds = skia.Rect.MakeEmpty()
             for child in line.children:
                 if child.node.parent == self.node:
